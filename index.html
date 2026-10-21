@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#141229">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Round Logger">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<title>Matchup Lab — Round Logger</title>
+<style>
+:root{
+  --bg:#12101f; --card:#1b1930; --line:#2d2a47; --ink:#f2f1f8; --muted:#a3a0c0;
+  --accent:#7c5cfc; --win:#22c07a; --loss:#f05a63; --tie:#e0a33a;
+  --tap:52px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+body{padding:max(12px,env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
+h1{font-size:19px;margin:4px 0 2px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+label.lbl{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
+select,input,textarea,button{font:inherit;color:var(--ink)}
+select,input,textarea{width:100%;background:#15132a;border:1px solid var(--line);
+  border-radius:11px;padding:13px 12px;min-height:var(--tap)}
+textarea{min-height:66px;resize:vertical}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.seg button, .pick button{min-height:var(--tap);border-radius:11px;border:1px solid var(--line);
+  background:#15132a;font-weight:600}
+.seg button[aria-pressed="true"][data-r="W"]{background:var(--win);border-color:var(--win);color:#06250f}
+.seg button[aria-pressed="true"][data-r="L"]{background:var(--loss);border-color:var(--loss);color:#2c0409}
+.seg button[aria-pressed="true"][data-r="T"]{background:var(--tie);border-color:var(--tie);color:#2b1d02}
+.pick{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pick button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.game{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.game h3{font-size:14px;margin:0 0 8px;color:var(--muted);font-weight:600}
+.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(18,16,31,.96);
+  border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  display:flex;gap:8px;backdrop-filter:blur(8px)}
+.bar button{flex:1;min-height:var(--tap);border-radius:12px;border:0;font-weight:700;font-size:16px}
+#save{background:var(--accent);color:#fff}
+#tabsync{background:#15132a;color:var(--ink);border:1px solid var(--line);flex:0 0 42%}
+.calm-btn,.danger-btn{margin-top:10px;min-height:var(--tap);width:100%;border-radius:12px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-weight:600;font-size:15px}
+.calm-btn{color:var(--ink)}
+.item{cursor:pointer}
+.row-right{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.del{min-width:var(--tap);min-height:var(--tap);border-radius:10px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-size:17px;line-height:1;padding:0}
+.del:active{background:#2a1520}
+.item:active{background:#1b1930}
+.list{margin-top:4px}
+.item{display:flex;justify-content:space-between;gap:10px;align-items:center;
+  padding:11px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item b{font-weight:600}
+.item .meta{color:var(--muted);font-size:12.5px}
+.res{font-weight:800;min-width:26px;text-align:right}
+.res.W{color:var(--win)} .res.L{color:var(--loss)} .res.T{color:var(--tie)}
+.note{color:var(--muted);font-size:12.5px;margin-top:8px}
+.warn{background:#2a1c10;border-color:#6b4a1e;color:#f0d2a6}
+.ok{color:var(--win)} .bad{color:var(--loss)}
+.hidden{display:none}
+.count{background:var(--accent);border-radius:999px;padding:1px 8px;font-size:12px;margin-left:6px}
+details summary{min-height:var(--tap);display:flex;align-items:center;cursor:pointer;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<h1>Round Logger</h1>
+<p class="sub" id="sub">Records rounds while you play. Nothing leaves the phone until you send it.</p>
+
+<div id="screen-log">
+  <div class="card">
+    <label class="lbl" for="opp">Opponent deck</label>
+    <select id="opp"></select>
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label class="lbl" for="event">Where</label>
+        <select id="event"></select>
+      </div>
+      <div>
+        <label class="lbl" for="bo">Format</label>
+        <select id="bo"><option value="3">Best of three</option><option value="1">Single game</option></select>
+      </div>
+    </div>
+  </div>
+  <div class="card" id="games"></div>
+  <div class="card">
+    <label class="lbl" for="note">One takeaway (optional)</label>
+    <textarea id="note" maxlength="300" placeholder="What will I do differently?"></textarea>
+  </div>
+</div>
+
+<div id="screen-sync" class="hidden">
+  <div class="card" id="syncState"></div>
+  <div class="card">
+    <h3 style="margin:0 0 10px;font-size:15px">Send rounds to your database</h3>
+    <label class="lbl" for="repo">Private repository (owner/name)</label>
+    <input id="repo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="your-account/matchup-lab-data">
+    <label class="lbl" for="token" style="margin-top:12px">Fine-grained token · Contents: read and write</label>
+    <input id="token" type="password" autocomplete="off" placeholder="github_pat_…">
+    <button id="connect" style="margin-top:14px;min-height:var(--tap);width:100%;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:700">Save and send now</button>
+    <p class="note" id="syncMsg"></p>
+    <p class="note"><b>Worth knowing.</b> On this page the token has to live in the phone's browser storage, which is weaker than the desktop app, where it never reaches the page at all. Use a token limited to this one repository, and revoke it on GitHub if the phone is lost.</p>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px;font-size:15px">Or move a file by hand</h3>
+    <p class="note" style="margin-top:0">No token, nothing on the network. Send the file to yourself, then use <b>Import a backup</b> in the desktop app.</p>
+    <button id="share" style="margin-top:8px;min-height:var(--tap);width:100%;border-radius:12px;border:1px solid var(--line);background:#15132a;color:var(--ink);font-weight:600">Share the rounds file</button>
+    <p class="note" id="shareMsg"></p>
+  </div>
+  <div class="card">
+    <details><summary>Rounds held on this phone (<span id="held">0</span>)</summary>
+      <div class="list" id="list"></div>
+      <p class="note" id="tapHint">Tap ✕ on a round to delete just that one.</p>
+      <button id="wipe" class="calm-btn">Clear rounds already sent</button>
+      <button id="wipeAll" class="danger-btn">Clear every round</button>
+      <button id="forget" class="danger-btn">Forget repository and token</button>
+      <p class="note">Use the last one before lending the phone to anyone, or if you stop using sync. It removes the saved token from this phone; it does not revoke it on GitHub.</p>
+    </details>
+  </div>
+  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-21 v2.6</p>
+</div>
+
+<div class="bar">
+  <button id="tabsync">Send<span class="count" id="badge">0</span></button>
+  <button id="save">Save round</button>
+</div>
+
+<script>/* Matchup Lab — shared merge logic.
+ *
+ * A faithful port of merge_states / merge_configs / tombstones_for in sync.py.
+ * Both run against the same file, so any disagreement silently corrupts the
+ * database. Three details carry the risk and are why this uses Map:
+ *   - a plain JS object reorders keys that look like integers, which would
+ *     change entry order before the (stable) sort;
+ *   - _by_id advances its index over non-object items it skips;
+ *   - the demo-deck cull re-checks the deck count as it removes, so it can
+ *     never remove the last deck.
+ */
+(function (root) {
+  "use strict";
+
+  function byId(items) {
+    var out = new Map();
+    var list = items || [];
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      if (it === null || typeof it !== "object" || Array.isArray(it)) continue;
+      var raw = it.id;
+      out.set(String(raw ? raw : "_" + i), it);
+    }
+    return out;
+  }
+
+  function num(v) { return v ? v : 0; }
+
+  function mergeStates(a, b) {
+    a = a || {}; b = b || {};
+    var tombs = Object.assign({}, a._tombstones || {});
+    var bt = b._tombstones || {};
+    Object.keys(bt).forEach(function (k) {
+      if (bt[k] > (tombs[k] || 0)) tombs[k] = bt[k];
+    });
+
+    function union(key) {
+      var merged = byId(a[key]);
+      byId(b[key]).forEach(function (v, k) { merged.set(k, v); });
+      var out = [];
+      merged.forEach(function (v, k) {
+        if (!Object.prototype.hasOwnProperty.call(tombs, k)) out.push(v);
+      });
+      return out;
+    }
+
+    var newer = num(a._updatedAt) >= num(b._updatedAt) ? a : b;
+    var older = newer === a ? b : a;
+    var matches = union("matches").sort(function (x, y) { return num(x.ts) - num(y.ts); });
+    var drills  = union("drills").sort(function (x, y) { return num(x.ts) - num(y.ts); });
+
+    return {
+      config: mergeConfigs(newer.config, older.config, matches),
+      matches: matches,
+      drills: drills,
+      _updatedAt: Math.max(num(a._updatedAt), num(b._updatedAt)),
+      _tombstones: tombs
+    };
+  }
+
+  function isEmpty(o) { return !o || Object.keys(o).length === 0; }
+
+  function mergeConfigs(newer, older, matches) {
+    newer = Object.assign({}, newer || {});
+    older = Object.assign({}, older || {});
+    if (isEmpty(newer)) return older;
+
+    var decks = new Map();
+    (older.decks || []).forEach(function (d) {
+      if (d && typeof d === "object" && d.id) decks.set(d.id, d);
+    });
+    (newer.decks || []).forEach(function (d) {
+      if (d && typeof d === "object" && d.id) decks.set(d.id, d);
+    });
+
+    var counts = new Map();
+    (matches || []).forEach(function (m) {
+      var k = m && m.myDeck;
+      if (k) counts.set(k, (counts.get(k) || 0) + 1);
+    });
+
+    if (decks.size > 1) {
+      Array.from(decks.keys()).forEach(function (did) {
+        var d = decks.get(did);
+        if (!counts.get(did) && d && d.demoList && decks.size > 1) decks.delete(did);
+      });
+    }
+
+    var merged = Object.assign({}, newer);
+    var deckList = Array.from(decks.values());
+    merged.decks = deckList.length ? deckList
+                 : ((newer.decks && newer.decks.length) ? newer.decks : (older.decks || []));
+
+    var active = merged.active;
+    if (!decks.has(active) || !counts.get(active)) {
+      if (counts.size) {
+        var best = null, bestN = -Infinity;
+        counts.forEach(function (n, k) { if (n > bestN) { bestN = n; best = k; } });
+        if (decks.has(best)) active = best;
+      }
+      if (!decks.has(active) && merged.decks.length) active = merged.decks[0].id;
+      merged.active = active;
+    }
+    return merged;
+  }
+
+  function tombstonesFor(previous, incoming, nowMs) {
+    var now = nowMs === undefined ? Date.now() : nowMs;
+    var tombs = Object.assign({}, (previous || {})._tombstones || {});
+    ["matches", "drills"].forEach(function (key) {
+      var prev = byId((previous || {})[key]);
+      var inc = byId((incoming || {})[key]);
+      prev.forEach(function (_v, id) { if (!inc.has(id)) tombs[id] = now; });
+    });
+    ["matches", "drills"].forEach(function (key) {
+      byId((incoming || {})[key]).forEach(function (_v, id) { delete tombs[id]; });
+    });
+    return tombs;
+  }
+
+  var api = { mergeStates: mergeStates, mergeConfigs: mergeConfigs, tombstonesFor: tombstonesFor };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.MatchupMerge = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+<script>/* Matchup Lab — GitHub-backed store for the mobile edition.
+ *
+ * Mirrors GitHubStore in sync.py so a phone and a computer can share one file.
+ * The access token never appears here: every call goes through a transport the
+ * host supplies (on iOS that is Swift, reading the token from the Keychain),
+ * so the web layer cannot read, log or leak it.
+ *
+ *   transport(method, url, bodyObject) -> Promise<{status, json}>
+ */
+(function (root) {
+  "use strict";
+  var merge = (typeof require === "function") ? require("./merge.js") : root.MatchupMerge;
+
+  function b64encodeUtf8(str) {
+    var bytes = new TextEncoder().encode(str), bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64decodeUtf8(b64) {
+    var bin = atob((b64 || "").replace(/\s+/g, ""));
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+  function serialize(state) { return JSON.stringify(state, null, 1); }
+
+  function GhStore(cfg, transport) {
+    this.repo = String(cfg.repo || "").trim().replace(/^\/+|\/+$/g, "");
+    this.path = String(cfg.path || "data.json").trim().replace(/^\/+/, "");
+    this.branch = String(cfg.branch || "main").trim();
+    this.base = String(cfg.apiBase || "https://api.github.com").replace(/\/+$/, "");
+    this.transport = transport;
+    this.sha = null;
+    this.message = "";
+    this.lastPull = null;
+    this.lastPush = null;
+  }
+
+  GhStore.prototype.enabled = function () {
+    return !!(this.repo && this.repo.indexOf("/") > 0);
+  };
+  GhStore.prototype._readUrl = function () {
+    return this.base + "/repos/" + this.repo + "/contents/" + this.path + "?ref=" + encodeURIComponent(this.branch);
+  };
+  GhStore.prototype._writeUrl = function () {
+    return this.base + "/repos/" + this.repo + "/contents/" + this.path;
+  };
+
+  GhStore.prototype.pull = function () {
+    var self = this;
+    return this.transport("GET", this._readUrl(), null).then(function (r) {
+      if (r.status === 404) {
+        self.sha = null; self.lastPull = Date.now();
+        self.message = "no file in the repository yet — the first save creates it";
+        return null;
+      }
+      if (r.status < 200 || r.status >= 300) throw httpError(r);
+      self.sha = r.json && r.json.sha;
+      var text = b64decodeUtf8((r.json && r.json.content) || "");
+      self.lastPull = Date.now(); self.message = "";
+      return text.trim() ? JSON.parse(text) : null;
+    });
+  };
+
+  GhStore.prototype.push = function (state, note) {
+    var self = this;
+    var body = {
+      message: note || "update from Matchup Lab",
+      content: b64encodeUtf8(serialize(state)),
+      branch: this.branch
+    };
+    if (this.sha) body.sha = this.sha;
+    return this.transport("PUT", this._writeUrl(), body).then(function (r) {
+      if (r.status === 409 || r.status === 422) {
+        // someone else wrote it meanwhile: take their copy, merge, write again
+        return self.pull().then(function (remote) {
+          var merged = merge.mergeStates(remote || {}, state);
+          body.content = b64encodeUtf8(serialize(merged));
+          if (self.sha) body.sha = self.sha; else delete body.sha;
+          return self.transport("PUT", self._writeUrl(), body).then(function (r2) {
+            if (r2.status < 200 || r2.status >= 300) throw httpError(r2);
+            self.sha = r2.json && r2.json.content && r2.json.content.sha;
+            self.lastPush = Date.now();
+            self.message = "merged with a change made elsewhere";
+            return merged;
+          });
+        });
+      }
+      if (r.status < 200 || r.status >= 300) throw httpError(r);
+      self.sha = r.json && r.json.content && r.json.content.sha;
+      self.lastPush = Date.now(); self.message = "";
+      return state;
+    });
+  };
+
+  /* Always pull and merge before writing, so an empty or stale device can
+     never blank out what the others have. Same rule as the desktop server. */
+  GhStore.prototype.syncNow = function (localState) {
+    var self = this;
+    return this.pull().then(function (remote) {
+      var merged = merge.mergeStates(remote || {}, localState || {});
+      return self.push(merged).then(function (written) { return written || merged; });
+    });
+  };
+
+  function httpError(r) {
+    var msg = (r.json && (r.json.message || r.json.error)) || ("HTTP " + r.status);
+    var e = new Error(msg); e.status = r.status; return e;
+  }
+
+  function describeError(e) {
+    var s = e && e.status;
+    if (s === 401) return "GitHub rejected the token (401). Check it has not expired.";
+    if (s === 403) return "GitHub refused access (403). The token needs Contents: read and write on this repository.";
+    if (s === 404) return "Repository or branch not found (404). Check the name and branch.";
+    if (s) return "GitHub returned " + s + ". " + (e.message || "");
+    return "No connection to GitHub (" + ((e && e.message) || e) + ").";
+  }
+
+  var api = { GhStore: GhStore, describeError: describeError, _b64: b64encodeUtf8, _unb64: b64decodeUtf8 };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.MatchupGh = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+<script>
+"use strict";
+var ARCH = [{"id": "dragapult-ex", "name": "Dragapult", "share": 14.11}, {"id": "dhelmise-pbl", "name": "Dhelmise", "share": 5.6}, {"id": "basic-box-m", "name": "Basic Box", "share": 5.07}, {"id": "slowking-scr", "name": "Slowking", "share": 4.7}, {"id": "sharpedo-toxtricity", "name": "Sharpedo Toxtricity", "share": 4.58}, {"id": "n-zoroark", "name": "N's Zoroark", "share": 3.97}, {"id": "dragapult-blaziken", "name": "Dragapult Blaziken", "share": 3.76}, {"id": "lucario-hariyama", "name": "Lucario Hariyama", "share": 3.68}, {"id": "ogerpon-meganium-hydrapple", "name": "Ogerpon Meganium Hydrapple", "share": 3.11}, {"id": "mega-excadrill-ex", "name": "Mega Excadrill", "share": 3.07}, {"id": "alakazam-dusknoir", "name": "Alakazam Dusknoir", "share": 2.99}, {"id": "alakazam-dudunsparce", "name": "Alakazam Dudunsparce", "share": 2.82}, {"id": "dragapult-dusknoir", "name": "Dragapult Dusknoir", "share": 2.58}, {"id": "festival-lead", "name": "Festival Lead", "share": 2.58}, {"id": "crustle-dri", "name": "Crustle", "share": 1.96}, {"id": "mega-greninja-ex", "name": "Mega Greninja", "share": 1.88}, {"id": "toucannon-pbl", "name": "Toucannon", "share": 1.8}, {"id": "cynthia-garchomp-ex", "name": "Cynthia's Garchomp", "share": 1.76}, {"id": "lopunny-dusknoir", "name": "Lopunny Dusknoir", "share": 1.51}, {"id": "lopunny-dudunsparce", "name": "Lopunny Dudunsparce", "share": 1.47}, {"id": "grimmsnarl-froslass", "name": "Grimmsnarl Froslass", "share": 1.39}, {"id": "mew-ex-30c", "name": "Mew Box", "share": 1.35}, {"id": "ogerpon-meganium-arboliva", "name": "Ogerpon Meganium Arboliva", "share": 1.27}, {"id": "mega-lucario-ex", "name": "Mega Lucario", "share": 1.27}, {"id": "greninja-ex", "name": "Greninja", "share": 1.23}, {"id": "starmie-froslass", "name": "Starmie Froslass", "share": 1.06}, {"id": "other", "name": "Other / rogue", "share": 19.43}];
+var REASONS = [["", "— no reason given"], ["donk", "Donk — lost before turn 3"], ["start", "Dead opening / mulligans"], ["draw", "Draw chain broke"], ["prize", "Prize mapping"], ["tempo", "Lost tempo after turn 1"], ["lock", "Ability or supporter lock"], ["plan", "Prize-trade plan error"], ["misplay", "My own misplay"], ["deck", "Gap in the deck list"], ["time", "Ran out of time"], ["matchup", "The matchup is simply bad"]];
+var EVENTS = {"test": "Testing", "league": "League", "cup": "Cup", "regional": "Regional"};
+var LS = "matchup-lab-phone-v1";
+var CFG = "matchup-lab-phone-cfg";
+
+function $(s){ return document.querySelector(s); }
+function el(tag, cls, text){ var e=document.createElement(tag); if(cls) e.className=cls;
+  if(text!=null) e.textContent=text; return e; }
+function load(){ try{ return JSON.parse(localStorage.getItem(LS)) || []; }catch(e){ return []; } }
+function save(rows){ try{ localStorage.setItem(LS, JSON.stringify(rows)); }catch(e){
+  alert("This phone refused to store the round. Free some space and try again."); } }
+function cfg(){ try{ return JSON.parse(localStorage.getItem(CFG)) || {}; }catch(e){ return {}; } }
+function setCfg(c){ try{ localStorage.setItem(CFG, JSON.stringify(c)); }catch(e){} }
+
+/* ---- the form ---------------------------------------------------------- */
+var draft = { bo:3, games:[{},{},{}] };
+
+function fillSelects(){
+  var opp=$("#opp");
+  ARCH.slice().sort(function(a,b){ return b.share-a.share; }).forEach(function(a){
+    opp.appendChild(new Option(a.name + "  (" + a.share.toFixed(1) + "% of field)", a.id));
+  });
+  opp.appendChild(new Option("Other / not listed", "other"));
+  var ev=$("#event");
+  Object.keys(EVENTS).forEach(function(k){ ev.appendChild(new Option(EVENTS[k], k)); });
+  ev.value = cfg().event || "regional";
+  $("#bo").value = String(cfg().bo || 3);
+}
+
+function renderGames(){
+  var box=$("#games"); box.innerHTML="";
+  var n = draft.bo === 1 ? 1 : 3;
+  for(var i=0;i<n;i++){
+    (function(i){
+      var g = draft.games[i] || (draft.games[i] = {});
+      var wrap = el("div", i ? "game" : "");
+      wrap.appendChild(el("h3", null, n===1 ? "Result" : "Game " + (i+1)));
+      var seg = el("div","seg");
+      [["W","Win"],["L","Loss"],["T","Tie"]].forEach(function(p){
+        var btn=el("button",null,p[1]); btn.dataset.r=p[0];
+        btn.setAttribute("aria-pressed", String(g.r===p[0]));
+        btn.onclick=function(){ g.r = (g.r===p[0] ? undefined : p[0]); renderGames(); };
+        seg.appendChild(btn);
+      });
+      wrap.appendChild(seg);
+      if(g.r){
+        var who = el("div","pick"); who.style.marginTop="8px";
+        [[true,"I went first"],[false,"Opponent first"]].forEach(function(p){
+          var btn=el("button",null,p[1]);
+          btn.setAttribute("aria-pressed", String(g.first===p[0]));
+          btn.onclick=function(){ g.first = (g.first===p[0] ? undefined : p[0]); renderGames(); };
+          who.appendChild(btn);
+        });
+        wrap.appendChild(who);
+      }
+      if(g.r==="L"){
+        var lab=el("label","lbl","Why this game was lost"); lab.style.marginTop="10px";
+        wrap.appendChild(lab);
+        var sel=el("select");
+        REASONS.forEach(function(r){ sel.appendChild(new Option(r[1], r[0])); });
+        sel.value = g.reason || "";
+        sel.onchange=function(){ g.reason = sel.value; };
+        wrap.appendChild(sel);
+      }
+      box.appendChild(wrap);
+    })(i);
+  }
+}
+
+function seriesResult(games){
+  var w=0,l=0,t=0;
+  games.forEach(function(g){ if(g.r==="W")w++; else if(g.r==="L")l++; else if(g.r==="T")t++; });
+  if(w>l) return "W";
+  if(l>w) return "L";
+  return "T";
+}
+
+function uid(){
+  return "ph-" + Date.now().toString(36) + "-" +
+    Math.random().toString(36).slice(2,10);
+}
+
+$("#save").onclick = function(){
+  var n = draft.bo === 1 ? 1 : 3;
+  var games = draft.games.slice(0,n).filter(function(g){ return g.r; });
+  if(!games.length){ alert("Mark the result of at least one game."); return; }
+  var row = {
+    id: uid(),
+    opp: $("#opp").value,
+    bo: draft.bo,
+    games: games.map(function(g){
+      var o = { r:g.r };
+      if(g.first !== undefined) o.first = g.first;
+      if(g.reason) o.reason = g.reason;
+      return o;
+    }),
+    event: $("#event").value,
+    note: $("#note").value.trim(),
+    date: new Date().toISOString().slice(0,10),
+    ts: Date.now(),
+    fromPhone: true
+  };
+  row.result = seriesResult(row.games);
+  var rows = load(); rows.push(row); save(rows);
+  setCfg(Object.assign(cfg(), { event: row.event, bo: draft.bo }));
+  draft = { bo: draft.bo, games:[{},{},{}] };
+  $("#note").value = "";
+  renderGames(); refresh();
+  var s=$("#sub"); var was=s.textContent;
+  s.textContent = "Saved: " + labelFor(row.opp) + " — " + row.result + ". " + rows.length + " held on this phone.";
+  setTimeout(function(){ s.textContent = was; }, 2600);
+};
+
+function labelFor(id){
+  var a = ARCH.filter(function(x){ return x.id===id; })[0];
+  return a ? a.name : (id==="other" ? "Other" : id);
+}
+
+$("#bo").onchange = function(){ draft.bo = Number(this.value); renderGames(); };
+
+/* ---- held rounds, sending ---------------------------------------------- */
+function refresh(){
+  var rows = load();
+  $("#badge").textContent = String(rows.length);
+  $("#held").textContent = String(rows.length);
+  var list = $("#list"); list.innerHTML = "";
+  rows.slice().reverse().forEach(function(r){
+    var it = el("div","item");
+    var left = el("div");
+    left.appendChild(el("b", null, labelFor(r.opp)));
+    var bits = r.games.map(function(g){ return g.r; }).join(" ");
+    left.appendChild(el("div","meta", r.date + " · " + (EVENTS[r.event]||r.event) + " · " + bits +
+      (r.sent ? " · sent" : "")));
+    it.appendChild(left);
+    var right = el("div","row-right");
+    right.appendChild(el("div","res " + r.result, r.result));
+    var del = el("button","del","\u2715");
+    del.type = "button";
+    del.setAttribute("aria-label","Delete this round");
+    del.onclick = function(ev){ ev.stopPropagation(); removeRound(r.id); };
+    right.appendChild(del);
+    it.appendChild(right);
+    it.onclick = function(){ removeRound(r.id); };
+    list.appendChild(it);
+  });
+  if(!rows.length) list.appendChild(el("p","note","Nothing recorded yet."));
+  var th = $("#tapHint"); if(th) th.style.display = rows.length ? "" : "none";
+}
+
+$("#tabsync").onclick = function(){
+  var a=$("#screen-log"), b=$("#screen-sync");
+  var toSync = b.classList.contains("hidden");
+  b.classList.toggle("hidden", !toSync);
+  a.classList.toggle("hidden", toSync);
+  $("#save").style.display = toSync ? "none" : "";
+  this.firstChild.textContent = toSync ? "Back" : "Send";
+  if(toSync) renderSyncState();
+  window.scrollTo(0,0);
+};
+
+function renderSyncState(){
+  var c = cfg(), box = $("#syncState");
+  box.innerHTML = "";
+  box.appendChild(el("h3", null, "Status")).style.cssText="margin:0 0 8px;font-size:15px";
+  var rows = load(), unsent = rows.filter(function(r){ return !r.sent; }).length;
+  box.appendChild(el("p","note", c.repo ? ("Connected to " + c.repo + ".") :
+    "No repository saved yet. You can still move a file by hand."));
+  box.appendChild(el("p","note", unsent + " round" + (unsent===1?"":"s") + " waiting to be sent."));
+  if(c.lastSync) box.appendChild(el("p","note","Last sent " + new Date(c.lastSync).toLocaleString()));
+  $("#repo").value = c.repo || "";
+}
+
+function phoneRowsAsState(rows, deckId){
+  /* The desktop keys matches to a deck. We do not know its id here, so the
+     rounds carry a marker and the import lands them on the active deck. */
+  return {
+    config: {}, drills: [], trash: [],
+    matches: rows.map(function(r){
+      var m = JSON.parse(JSON.stringify(r));
+      m.myDeck = deckId || "__phone__";
+      delete m.sent;
+      return m;
+    }),
+    _updatedAt: Date.now(), _tombstones: {}
+  };
+}
+
+$("#connect").onclick = function(){
+  var repo = $("#repo").value.trim(), token = $("#token").value.trim();
+  var msg = $("#syncMsg");
+  if(repo.indexOf("/") < 1){ msg.textContent = "Write the repository as owner/name."; return; }
+  if(token.length < 20 && !cfg().token){ msg.textContent = "Paste the whole token GitHub showed you."; return; }
+  var c = cfg(); c.repo = repo; if(token) c.token = token; setCfg(c);
+  $("#token").value = "";
+  sendNow();
+};
+
+function sendNow(){
+  var c = cfg(), msg = $("#syncMsg");
+  if(!c.repo || !c.token){ msg.textContent = "Save the repository and token first."; return; }
+  var rows = load(), pending = rows.filter(function(r){ return !r.sent; });
+  if(!pending.length){ msg.textContent = "Nothing new to send."; return; }
+  msg.textContent = "Sending…"; msg.className = "note";
+  var transport = function(method, url, body){
+    return fetch(url, {
+      method: method,
+      headers: {
+        "Authorization": "Bearer " + c.token,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json"
+      },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){
+      return r.text().then(function(t){
+        var j = null; try{ j = JSON.parse(t); }catch(e){}
+        return { status: r.status, json: j };
+      });
+    });
+  };
+  var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
+                                      branch: c.branch || "main" }, transport);
+  store.syncNow(phoneRowsAsState(pending, c.deckId))
+    .then(function(){
+      var all = load();
+      all.forEach(function(r){ if(!r.sent && pending.some(function(p){ return p.id===r.id; })) r.sent = true; });
+      save(all);
+      c.lastSync = Date.now(); setCfg(c);
+      msg.textContent = "Sent " + pending.length + " round" + (pending.length===1?"":"s") + ".";
+      msg.className = "note ok";
+      refresh(); renderSyncState();
+    })
+    .catch(function(e){
+      msg.textContent = MatchupGh.describeError(e);
+      msg.className = "note bad";
+    });
+}
+
+$("#share").onclick = function(){
+  var rows = load();
+  if(!rows.length){ $("#shareMsg").textContent = "Nothing recorded yet."; return; }
+  var payload = JSON.stringify(phoneRowsAsState(rows, cfg().deckId), null, 1);
+  var name = "matchup-lab-phone-" + new Date().toISOString().slice(0,10) + ".json";
+  var file = null;
+  try { file = new File([payload], name, { type: "application/json" }); } catch(e){}
+  if(file && navigator.canShare && navigator.canShare({ files: [file] })){
+    navigator.share({ files: [file], title: "Matchup Lab rounds" })
+      .then(function(){ $("#shareMsg").textContent = "Shared."; })
+      .catch(function(){ $("#shareMsg").textContent = "Sharing was cancelled."; });
+    return;
+  }
+  var url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+  var a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  $("#shareMsg").textContent = "If nothing opened, press and hold this button and choose Download.";
+};
+
+function removeRound(id){
+  var rows = load(), hit = null;
+  for(var i=0;i<rows.length;i++){ if(rows[i].id === id){ hit = rows[i]; break; } }
+  if(!hit) return;
+  var warn = hit.sent ? "" : "\n\nThis round has not been sent anywhere yet.";
+  if(!confirm("Delete the round against " + labelFor(hit.opp) + " (" + hit.result + ")?" + warn)) return;
+  save(rows.filter(function(r){ return r.id !== id; }));
+  refresh(); renderSyncState();
+}
+
+$("#wipe").onclick = function(){
+  var rows = load(), kept = rows.filter(function(r){ return !r.sent; });
+  if(!rows.length){ alert("Nothing recorded yet."); return; }
+  if(kept.length === rows.length){
+    alert("None of these " + rows.length + " round" + (rows.length===1?"":"s") +
+      (rows.length===1?" has":" have") + " been sent yet, so there is nothing safe to clear here.\n\n" +
+      "Tap a single round in the list to delete just that one, or use Clear every round.");
+    return;
+  }
+  if(!confirm("Remove " + (rows.length - kept.length) + " rounds already sent?")) return;
+  save(kept); refresh(); renderSyncState();
+};
+
+$("#wipeAll").onclick = function(){
+  var rows = load();
+  if(!rows.length){ alert("Nothing recorded yet."); return; }
+  var unsent = rows.filter(function(r){ return !r.sent; }).length;
+  var msg = "Delete all " + rows.length + " round" + (rows.length===1?"":"s") + " on this phone?";
+  if(unsent) msg += "\n\n" + unsent + " of them " + (unsent===1?"has":"have") +
+    " not been sent anywhere yet. Once deleted " + (unsent===1?"it is":"they are") + " gone for good.";
+  if(!confirm(msg)) return;
+  if(unsent && !confirm("Last check: " + unsent + " unsent round" + (unsent===1?"":"s") +
+    " will be lost. Delete anyway?")) return;
+  save([]); refresh(); renderSyncState();
+  $("#shareMsg").textContent = ""; $("#syncMsg").textContent = "The logger is empty.";
+};
+
+$("#forget").onclick = function(){
+  var c = cfg();
+  if(!c.repo && !c.token){ alert("No repository or token is saved on this phone."); return; }
+  if(!confirm("Remove the saved repository and token from this phone?\n\nRecorded rounds are kept. " +
+    "Revoke the token on GitHub as well if the phone may be out of your hands.")) return;
+  try{ localStorage.removeItem(CFG); }catch(e){}
+  $("#repo").value = ""; $("#token").value = "";
+  renderSyncState();
+  $("#syncMsg").textContent = "Repository and token removed from this phone.";
+};
+
+fillSelects(); renderGames(); refresh();
+
+/* Served over https (or on localhost) the logger installs as a real offline app:
+   add it to the Home Screen once and it opens with no signal at the venue. */
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").catch(function () { /* fine without it */ });
+  });
+}
+</script>
+</body>
+</html>

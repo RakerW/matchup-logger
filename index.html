@@ -50,6 +50,9 @@ textarea{min-height:66px;resize:vertical}
 .calm-btn,.danger-btn{margin-top:10px;min-height:var(--tap);width:100%;border-radius:12px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-weight:600;font-size:15px}
 .calm-btn{color:var(--ink)}
 .warn-note{color:var(--tie)}
+.lbl-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.inline-btn{min-height:32px;padding:0 12px;border-radius:9px;border:1px solid var(--line);
+  background:#15132a;color:var(--ink);font-weight:600;font-size:13px}
 .item{cursor:pointer}
 .row-right{display:flex;align-items:center;gap:10px;flex:0 0 auto}
 .del{min-width:var(--tap);min-height:var(--tap);border-radius:10px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-size:17px;line-height:1;padding:0}
@@ -77,7 +80,8 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
 
 <div id="screen-log">
   <div class="card">
-    <label class="lbl" for="mydeck">My deck</label>
+    <div class="lbl-row"><label class="lbl" for="mydeck">My deck</label>
+      <button type="button" id="newdeck" class="inline-btn">+ New deck</button></div>
     <select id="mydeck"></select>
     <p class="note" id="deckNote"></p>
     <label class="lbl" for="opp" style="margin-top:12px;display:block">Opponent deck</label>
@@ -430,13 +434,17 @@ function rememberDeck(id, name){
 function fillDecks(){
   var sel = $("#mydeck"), c = cfg(), list = knownDecks();
   sel.innerHTML = "";
+  if (!list.length) {
+    var none = new Option("No deck yet — tap “+ New deck”", "");
+    none.disabled = true;
+    sel.appendChild(none);
+  }
   list.forEach(function(d){
     var o = new Option(d.name + (d.id ? "" : "  (typed here)"), d.id ? "id:" + d.id : "nm:" + d.name);
     sel.appendChild(o);
   });
-  sel.appendChild(new Option(list.length ? "+  Another deck…" : "+  Name your deck…", "__new__"));
   var want = c.deckId ? "id:" + c.deckId : (c.deckName ? "nm:" + c.deckName : "");
-  sel.value = want && [].some.call(sel.options, function(o){ return o.value === want; }) ? want : "__new__";
+  sel.value = want && [].some.call(sel.options, function(o){ return o.value === want; }) ? want : "";
   showDeckNote();
 }
 function showDeckNote(){
@@ -636,10 +644,14 @@ function phoneRowsAsState(rows, deckId){
 }
 
 $("#connect").onclick = function(){
-  var repo = $("#repo").value.trim(), token = $("#token").value.trim();
+  /* A paste on a phone arrives with stray spaces, a newline, or the quotes a
+     password manager wraps it in, and any of those makes GitHub answer 401. */
+  var repo = $("#repo").value.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "");
+  var token = $("#token").value.replace(/\s+/g, "").replace(/^["']|["']$/g, "");
   var msg = $("#syncMsg");
-  if(repo.indexOf("/") < 1){ msg.textContent = "Write the repository as owner/name."; return; }
-  if(token.length < 20 && !cfg().token){ msg.textContent = "Paste the whole token GitHub showed you."; return; }
+  if(repo.indexOf("/") < 1){ msg.textContent = "Write the repository as owner/name, for example rakerw/matchup-lab-data."; return; }
+  if(!token && !cfg().token){ msg.textContent = "The token field is empty — the paste did not land. Tap the field, hold, and choose Paste."; return; }
+  if(token && token.length < 20){ msg.textContent = "That token looks cut short (" + token.length + " characters). GitHub tokens are about 40 or 90. Copy the whole line."; return; }
   var c = cfg(); c.repo = repo; if(token) c.token = token; setCfg(c);
   $("#token").value = "";
   sendNow();
@@ -760,10 +772,25 @@ $("#loaddecks").onclick = function(){
   var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
                                       branch: c.branch || "main" }, transport);
   store.pull().then(function(remote){
+    /* A 404 reads the same as an empty file, and the two need different
+       fixes, so say which repository was read and what was missing. */
+    if (!remote) {
+      msg.textContent = "No " + (c.path || "data.json") + " in " + c.repo +
+        ". That is the private data repository the computer syncs to — not the one " +
+        "the logger page itself is published from. Check the name, and that the token " +
+        "has read access to it.";
+      msg.className = "note bad";
+      return;
+    }
     var decks = (remote && remote.config && remote.config.decks) || [];
     decks = decks.filter(function(d){ return d && d.id && !d.archived; })
                  .map(function(d){ return { id: d.id, name: d.name || d.id }; });
-    if(!decks.length){ msg.textContent = "No decks in the database yet."; return; }
+    if(!decks.length){
+      msg.textContent = "Read " + c.repo + ", but it holds no decks yet. Sync once " +
+        "from the computer first.";
+      msg.className = "note bad";
+      return;
+    }
     var cc = cfg();
     var typed = (Array.isArray(cc.decks) ? cc.decks : []).filter(function(d){ return !d.id; });
     cc.decks = decks.concat(typed);
@@ -789,9 +816,13 @@ $("#forget").onclick = function(){
 
 fillSelects(); fillDecks(); renderGames(); refresh();
 
+/* A button, not an option in the list: picking the option you are already on
+   fires no change event, so the first deck could never be typed. */
+$("#newdeck").onclick = function(){ askDeckName(); };
+
 $("#mydeck").onchange = function(){
-  if (this.value === "__new__") { askDeckName(); return; }
   var v = this.value;
+  if (!v) return;
   if (v.indexOf("id:") === 0) {
     var id = v.slice(3), hit = knownDecks().filter(function(d){ return d.id === id; })[0];
     rememberDeck(id, hit ? hit.name : id);

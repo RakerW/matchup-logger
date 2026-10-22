@@ -49,6 +49,7 @@ textarea{min-height:66px;resize:vertical}
 #tabsync{background:#15132a;color:var(--ink);border:1px solid var(--line);flex:0 0 42%}
 .calm-btn,.danger-btn{margin-top:10px;min-height:var(--tap);width:100%;border-radius:12px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-weight:600;font-size:15px}
 .calm-btn{color:var(--ink)}
+.warn-note{color:var(--tie)}
 .item{cursor:pointer}
 .row-right{display:flex;align-items:center;gap:10px;flex:0 0 auto}
 .del{min-width:var(--tap);min-height:var(--tap);border-radius:10px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-size:17px;line-height:1;padding:0}
@@ -76,7 +77,10 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
 
 <div id="screen-log">
   <div class="card">
-    <label class="lbl" for="opp">Opponent deck</label>
+    <label class="lbl" for="mydeck">My deck</label>
+    <select id="mydeck"></select>
+    <p class="note" id="deckNote"></p>
+    <label class="lbl" for="opp" style="margin-top:12px;display:block">Opponent deck</label>
     <select id="opp"></select>
     <div class="row" style="margin-top:12px">
       <div>
@@ -105,6 +109,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     <label class="lbl" for="token" style="margin-top:12px">Fine-grained token · Contents: read and write</label>
     <input id="token" type="password" autocomplete="off" placeholder="github_pat_…">
     <button id="connect" style="margin-top:14px;min-height:var(--tap);width:100%;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:700">Save and send now</button>
+    <button id="loaddecks" class="calm-btn">Load my decks from the database</button>
     <p class="note" id="syncMsg"></p>
     <p class="note"><b>Worth knowing.</b> On this page the token has to live in the phone's browser storage, which is weaker than the desktop app, where it never reaches the page at all. Use a token limited to this one repository, and revoke it on GitHub if the phone is lost.</p>
   </div>
@@ -401,6 +406,59 @@ function setCfg(c){ try{ localStorage.setItem(CFG, JSON.stringify(c)); }catch(e)
 /* ---- the form ---------------------------------------------------------- */
 var draft = { bo:3, games:[{},{},{}] };
 
+/* Which deck the rounds belong to.
+
+   Two ways in, so the logger is useful whether or not sync is set up. With a
+   repository configured it can read the real deck list, ids and all, and the
+   round lands in the right place with nothing to do on the computer. Without
+   one you type a name, which the computer matches by name on arrival. Every
+   round carries the name as well as the id, so a round is never anonymous. */
+function knownDecks(){
+  var c = cfg();
+  return Array.isArray(c.decks) ? c.decks : [];
+}
+function rememberDeck(id, name){
+  var c = cfg(), list = Array.isArray(c.decks) ? c.decks : [];
+  var at = -1;
+  for (var i=0;i<list.length;i++){
+    if ((id && list[i].id === id) || (!id && !list[i].id && list[i].name === name)) { at = i; break; }
+  }
+  if (at < 0) list.push({ id: id || "", name: name });
+  c.decks = list; c.deckId = id || ""; c.deckName = name;
+  setCfg(c);
+}
+function fillDecks(){
+  var sel = $("#mydeck"), c = cfg(), list = knownDecks();
+  sel.innerHTML = "";
+  list.forEach(function(d){
+    var o = new Option(d.name + (d.id ? "" : "  (typed here)"), d.id ? "id:" + d.id : "nm:" + d.name);
+    sel.appendChild(o);
+  });
+  sel.appendChild(new Option(list.length ? "+  Another deck…" : "+  Name your deck…", "__new__"));
+  var want = c.deckId ? "id:" + c.deckId : (c.deckName ? "nm:" + c.deckName : "");
+  sel.value = want && [].some.call(sel.options, function(o){ return o.value === want; }) ? want : "__new__";
+  showDeckNote();
+}
+function showDeckNote(){
+  var n = $("#deckNote"), c = cfg();
+  if (!c.deckName) {
+    n.textContent = "Pick or name the deck you are playing, so the rounds land in the right place.";
+    n.className = "note warn-note";
+  } else if (c.deckId) {
+    n.textContent = "Rounds go straight to " + c.deckName + " on the computer.";
+    n.className = "note";
+  } else {
+    n.textContent = "Saved as “" + c.deckName + "”. The computer will match it by name.";
+    n.className = "note";
+  }
+}
+function askDeckName(){
+  var name = (window.prompt("Name of the deck you are playing") || "").trim();
+  if (!name) { fillDecks(); return; }
+  rememberDeck("", name.slice(0, 60));
+  fillDecks();
+}
+
 function fillSelects(){
   var opp=$("#opp");
   ARCH.slice().sort(function(a,b){ return b.share-a.share; }).forEach(function(a){
@@ -470,8 +528,12 @@ $("#save").onclick = function(){
   var n = draft.bo === 1 ? 1 : 3;
   var games = draft.games.slice(0,n).filter(function(g){ return g.r; });
   if(!games.length){ alert("Mark the result of at least one game."); return; }
+  if(!cfg().deckName){ askDeckName(); if(!cfg().deckName) return; }
+  var c0 = cfg();
   var row = {
     id: uid(),
+    deckId: c0.deckId || "",
+    deckName: c0.deckName || "",
     opp: $("#opp").value,
     bo: draft.bo,
     games: games.map(function(g){
@@ -557,13 +619,15 @@ function renderSyncState(){
 }
 
 function phoneRowsAsState(rows, deckId){
-  /* The desktop keys matches to a deck. We do not know its id here, so the
-     rounds carry a marker and the import lands them on the active deck. */
+  /* Each round carries the deck it was played with: the real id when the deck
+     list has been read from the database, otherwise the name you typed, which
+     the computer matches on arrival. */
   return {
     config: {}, drills: [], trash: [],
     matches: rows.map(function(r){
       var m = JSON.parse(JSON.stringify(r));
-      m.myDeck = deckId || "__phone__";
+      m.myDeck = r.deckId || deckId || "__phone__";
+      if (r.deckName) m.deckName = r.deckName;
       delete m.sent;
       return m;
     }),
@@ -679,6 +743,39 @@ $("#wipeAll").onclick = function(){
   $("#shareMsg").textContent = ""; $("#syncMsg").textContent = "The logger is empty.";
 };
 
+$("#loaddecks").onclick = function(){
+  var c = cfg(), msg = $("#syncMsg");
+  if(!c.repo || !c.token){ msg.textContent = "Save the repository and token first."; return; }
+  var btn = this; btn.disabled = true;
+  msg.textContent = "Reading the deck list…";
+  var transport = function(method, url, body){
+    return fetch(url, { method: method,
+      headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
+                 "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){ return r.text().then(function(t){
+      var j=null; try{ j=JSON.parse(t); }catch(e){}
+      return { status: r.status, json: j }; }); });
+  };
+  var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
+                                      branch: c.branch || "main" }, transport);
+  store.pull().then(function(remote){
+    var decks = (remote && remote.config && remote.config.decks) || [];
+    decks = decks.filter(function(d){ return d && d.id && !d.archived; })
+                 .map(function(d){ return { id: d.id, name: d.name || d.id }; });
+    if(!decks.length){ msg.textContent = "No decks in the database yet."; return; }
+    var cc = cfg();
+    var typed = (Array.isArray(cc.decks) ? cc.decks : []).filter(function(d){ return !d.id; });
+    cc.decks = decks.concat(typed);
+    setCfg(cc);
+    fillDecks();
+    msg.textContent = "Loaded " + decks.length + " deck" + (decks.length===1?"":"s") + ".";
+    msg.className = "note ok";
+  }).catch(function(e){
+    msg.textContent = "Could not read the deck list: " + (e && e.message ? e.message : e);
+  }).then(function(){ btn.disabled = false; });
+};
+
 $("#forget").onclick = function(){
   var c = cfg();
   if(!c.repo && !c.token){ alert("No repository or token is saved on this phone."); return; }
@@ -690,7 +787,19 @@ $("#forget").onclick = function(){
   $("#syncMsg").textContent = "Repository and token removed from this phone.";
 };
 
-fillSelects(); renderGames(); refresh();
+fillSelects(); fillDecks(); renderGames(); refresh();
+
+$("#mydeck").onchange = function(){
+  if (this.value === "__new__") { askDeckName(); return; }
+  var v = this.value;
+  if (v.indexOf("id:") === 0) {
+    var id = v.slice(3), hit = knownDecks().filter(function(d){ return d.id === id; })[0];
+    rememberDeck(id, hit ? hit.name : id);
+  } else {
+    rememberDeck("", v.slice(3));
+  }
+  showDeckNote();
+};
 
 /* Served over https (or on localhost) the logger installs as a real offline app:
    add it to the Home Screen once and it opens with no signal at the venue. */

@@ -99,8 +99,10 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   </div>
   <div class="card" id="games"></div>
   <div class="card">
-    <label class="lbl" for="note">One takeaway (optional)</label>
-    <textarea id="note" maxlength="300" placeholder="What will I do differently?"></textarea>
+    <label class="lbl" for="comment">What happened in this round</label>
+    <textarea id="comment" maxlength="300" placeholder="Optional. How it went — worth a line after a win too."></textarea>
+    <label class="lbl" for="note" style="margin-top:12px;display:block">Main takeaway for next time</label>
+    <textarea id="note" maxlength="300" placeholder="Optional. What will I do differently?"></textarea>
   </div>
 </div>
 
@@ -393,8 +395,8 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
 <script>
 "use strict";
 var ARCH = [{"id": "dragapult-ex", "name": "Dragapult", "share": 14.11}, {"id": "dhelmise-pbl", "name": "Dhelmise", "share": 5.6}, {"id": "basic-box-m", "name": "Basic Box", "share": 5.07}, {"id": "slowking-scr", "name": "Slowking", "share": 4.7}, {"id": "sharpedo-toxtricity", "name": "Sharpedo Toxtricity", "share": 4.58}, {"id": "n-zoroark", "name": "N's Zoroark", "share": 3.97}, {"id": "dragapult-blaziken", "name": "Dragapult Blaziken", "share": 3.76}, {"id": "lucario-hariyama", "name": "Lucario Hariyama", "share": 3.68}, {"id": "ogerpon-meganium-hydrapple", "name": "Ogerpon Meganium Hydrapple", "share": 3.11}, {"id": "mega-excadrill-ex", "name": "Mega Excadrill", "share": 3.07}, {"id": "alakazam-dusknoir", "name": "Alakazam Dusknoir", "share": 2.99}, {"id": "alakazam-dudunsparce", "name": "Alakazam Dudunsparce", "share": 2.82}, {"id": "dragapult-dusknoir", "name": "Dragapult Dusknoir", "share": 2.58}, {"id": "festival-lead", "name": "Festival Lead", "share": 2.58}, {"id": "crustle-dri", "name": "Crustle", "share": 1.96}, {"id": "mega-greninja-ex", "name": "Mega Greninja", "share": 1.88}, {"id": "toucannon-pbl", "name": "Toucannon", "share": 1.8}, {"id": "cynthia-garchomp-ex", "name": "Cynthia's Garchomp", "share": 1.76}, {"id": "lopunny-dusknoir", "name": "Lopunny Dusknoir", "share": 1.51}, {"id": "lopunny-dudunsparce", "name": "Lopunny Dudunsparce", "share": 1.47}, {"id": "grimmsnarl-froslass", "name": "Grimmsnarl Froslass", "share": 1.39}, {"id": "mew-ex-30c", "name": "Mew Box", "share": 1.35}, {"id": "ogerpon-meganium-arboliva", "name": "Ogerpon Meganium Arboliva", "share": 1.27}, {"id": "mega-lucario-ex", "name": "Mega Lucario", "share": 1.27}, {"id": "greninja-ex", "name": "Greninja", "share": 1.23}, {"id": "starmie-froslass", "name": "Starmie Froslass", "share": 1.06}, {"id": "other", "name": "Other / rogue", "share": 19.43}];
-var REASONS = [["", "— no reason given"], ["donk", "Donk — lost before turn 3"], ["start", "Dead opening / mulligans"], ["draw", "Draw chain broke"], ["prize", "Prize mapping"], ["tempo", "Lost tempo after turn 1"], ["lock", "Ability or supporter lock"], ["plan", "Prize-trade plan error"], ["misplay", "My own misplay"], ["deck", "Gap in the deck list"], ["time", "Ran out of time"], ["matchup", "The matchup is simply bad"]];
-var EVENTS = {"test": "Testing", "league": "League", "cup": "Cup", "regional": "Regional"};
+var REASONS = [["", "No reason given"], ["donk", "Donk — lost before turn 3"], ["start", "Dead opening / mulligans"], ["draw", "Draw chain broke"], ["prize", "Prize mapping"], ["tempo", "Lost tempo after turn 1"], ["lock", "Ability or supporter lock"], ["plan", "Prize-trade plan error"], ["misplay", "My own misplay"], ["deck", "Gap in the deck list"], ["time", "Ran out of time"], ["matchup", "The matchup is simply bad"]];
+var EVENTS = {"test": "Practice / ladder", "league": "Local league", "cup": "Cup / Challenge", "regional": "Regional and above"};
 var LS = "matchup-lab-phone-v1";
 var CFG = "matchup-lab-phone-cfg";
 
@@ -475,7 +477,7 @@ function fillSelects(){
   opp.appendChild(new Option("Other / not listed", "other"));
   var ev=$("#event");
   Object.keys(EVENTS).forEach(function(k){ ev.appendChild(new Option(EVENTS[k], k)); });
-  ev.value = cfg().event || "regional";
+  ev.value = cfg().event || "test";
   $("#bo").value = String(cfg().bo || 3);
 }
 
@@ -495,16 +497,17 @@ function renderGames(){
         seg.appendChild(btn);
       });
       wrap.appendChild(seg);
-      if(g.r){
-        var who = el("div","pick"); who.style.marginTop="8px";
-        [[true,"I went first"],[false,"Opponent first"]].forEach(function(p){
-          var btn=el("button",null,p[1]);
-          btn.setAttribute("aria-pressed", String(g.first===p[0]));
-          btn.onclick=function(){ g.first = (g.first===p[0] ? undefined : p[0]); renderGames(); };
-          who.appendChild(btn);
-        });
-        wrap.appendChild(who);
-      }
+      /* Who started is known before the game ends and decides half the
+         matchups, so the buttons are there from the start rather than
+         appearing once a result is marked. */
+      var who = el("div","pick"); who.style.marginTop="8px";
+      [[true,"I went first"],[false,"Opponent first"]].forEach(function(p){
+        var btn=el("button",null,p[1]);
+        btn.setAttribute("aria-pressed", String(g.first===p[0]));
+        btn.onclick=function(){ g.first = (g.first===p[0] ? undefined : p[0]); renderGames(); };
+        who.appendChild(btn);
+      });
+      wrap.appendChild(who);
       if(g.r==="L"){
         var lab=el("label","lbl","Why this game was lost"); lab.style.marginTop="10px";
         wrap.appendChild(lab);
@@ -513,6 +516,16 @@ function renderGames(){
         sel.value = g.reason || "";
         sel.onchange=function(){ g.reason = sel.value; };
         wrap.appendChild(sel);
+      }
+      /* A won game is worth a line too: the reason list above only opens on a
+         loss, which left nowhere to note how a game actually went. */
+      if(g.r){
+        var nlab=el("label","lbl","Note about this game"); nlab.style.marginTop="10px";
+        wrap.appendChild(nlab);
+        var gn=el("input"); gn.type="text"; gn.maxLength=300; gn.value=g.note || "";
+        gn.placeholder="A good line, a close call, a lucky prize…";
+        gn.oninput=function(){ g.note = gn.value; };
+        wrap.appendChild(gn);
       }
       box.appendChild(wrap);
     })(i);
@@ -548,10 +561,12 @@ $("#save").onclick = function(){
       var o = { r:g.r };
       if(g.first !== undefined) o.first = g.first;
       if(g.reason) o.reason = g.reason;
+      if(g.note) o.note = g.note;
       return o;
     }),
     event: $("#event").value,
     note: $("#note").value.trim(),
+    comment: $("#comment").value.trim(),
     date: new Date().toISOString().slice(0,10),
     ts: Date.now(),
     fromPhone: true
@@ -561,6 +576,7 @@ $("#save").onclick = function(){
   setCfg(Object.assign(cfg(), { event: row.event, bo: draft.bo }));
   draft = { bo: draft.bo, games:[{},{},{}] };
   $("#note").value = "";
+  $("#comment").value = "";
   renderGames(); refresh();
   var s=$("#sub"); var was=s.textContent;
   s.textContent = "Saved: " + labelFor(row.opp) + " — " + row.result + ". " + rows.length + " held on this phone.";

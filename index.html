@@ -135,7 +135,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       <p class="note">Use the last one before lending the phone to anyone, or if you stop using sync. It removes the saved token from this phone; it does not revoke it on GitHub.</p>
     </details>
   </div>
-  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-21 v2.6</p>
+  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-24 v2.7</p>
 </div>
 
 <div class="bar">
@@ -771,11 +771,19 @@ $("#wipeAll").onclick = function(){
   $("#shareMsg").textContent = ""; $("#syncMsg").textContent = "The logger is empty.";
 };
 
-$("#loaddecks").onclick = function(){
+/* Decks are read on demand, and the phone keeps the answer. A deck added on
+   the computer therefore appears here only once the list is read again, which
+   is why this runs by itself every time the page opens - quietly, so a phone
+   with no signal says nothing and the logger stays usable. */
+function pullDecks(quiet){
   var c = cfg(), msg = $("#syncMsg");
-  if(!c.repo || !c.token){ msg.textContent = "Save the repository and token first."; return; }
-  var btn = this; btn.disabled = true;
-  msg.textContent = "Reading the deck list…";
+  if(!c.repo || !c.token){
+    if(!quiet){ msg.textContent = "Save the repository and token first."; }
+    return;
+  }
+  var btn = $("#loaddecks"); btn.disabled = true;
+  var say = function(text, cls){ if(quiet) return; msg.textContent = text; if(cls) msg.className = cls; };
+  if(!quiet) msg.textContent = "Reading the deck list…";
   var transport = function(method, url, body){
     return fetch(url, { method: method,
       headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
@@ -787,37 +795,45 @@ $("#loaddecks").onclick = function(){
   };
   var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
                                       branch: c.branch || "main" }, transport);
+  var before = knownDecks().slice();
   store.pull().then(function(remote){
     /* A 404 reads the same as an empty file, and the two need different
        fixes, so say which repository was read and what was missing. */
     if (!remote) {
-      msg.textContent = "No " + (c.path || "data.json") + " in " + c.repo +
+      say("No " + (c.path || "data.json") + " in " + c.repo +
         ". That is the private data repository the computer syncs to — not the one " +
         "the logger page itself is published from. Check the name, and that the token " +
-        "has read access to it.";
-      msg.className = "note bad";
+        "has read access to it.", "note bad");
       return;
     }
     var decks = (remote && remote.config && remote.config.decks) || [];
     decks = decks.filter(function(d){ return d && d.id && !d.archived; })
                  .map(function(d){ return { id: d.id, name: d.name || d.id }; });
     if(!decks.length){
-      msg.textContent = "Read " + c.repo + ", but it holds no decks yet. Sync once " +
-        "from the computer first.";
-      msg.className = "note bad";
+      say("Read " + c.repo + ", but it holds no decks yet. Sync once " +
+        "from the computer first.", "note bad");
       return;
     }
     var cc = cfg();
     var typed = (Array.isArray(cc.decks) ? cc.decks : []).filter(function(d){ return !d.id; });
     cc.decks = decks.concat(typed);
     setCfg(cc);
+    var added = decks.filter(function(d){
+      return !before.some(function(o){ return o.id === d.id; });
+    });
     fillDecks();
-    msg.textContent = "Loaded " + decks.length + " deck" + (decks.length===1?"":"s") + ".";
-    msg.className = "note ok";
+    if (quiet && added.length) {
+      msg.textContent = added.length === 1
+        ? "New deck from the computer: " + added[0].name + "."
+        : added.length + " new decks from the computer.";
+      msg.className = "note ok";
+    }
+    say("Loaded " + decks.length + " deck" + (decks.length===1?"":"s") + ".", "note ok");
   }).catch(function(e){
-    msg.textContent = "Could not read the deck list: " + (e && e.message ? e.message : e);
+    say("Could not read the deck list: " + (e && e.message ? e.message : e), "note bad");
   }).then(function(){ btn.disabled = false; });
-};
+}
+$("#loaddecks").onclick = function(){ pullDecks(false); };
 
 $("#forget").onclick = function(){
   var c = cfg();
@@ -831,6 +847,7 @@ $("#forget").onclick = function(){
 };
 
 fillSelects(); fillDecks(); renderGames(); refresh();
+pullDecks(true);
 
 /* A button, not an option in the list: picking the option you are already on
    fires no change event, so the first deck could never be typed. */

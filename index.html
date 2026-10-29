@@ -166,7 +166,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       <p class="note">Use the last one before lending the phone to anyone, or if you stop using sync. It removes the saved token from this phone; it does not revoke it on GitHub.</p>
     </details>
   </div>
-  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-24 v2.7</p>
+  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-29 v2.17.1</p>
 </div>
 
 <div id="screen-deck" class="hidden">
@@ -936,6 +936,44 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     };
   }
 
+  /* ---- which round came last ------------------------------------------
+     A round carries the DAY it was played, and the app has always stamped
+     `ts` with noon of that day rather than the moment it was typed in. Ten
+     rounds played on one afternoon therefore all carry the same number, and
+     a plain sort by it leaves them where they were entered - oldest at the
+     top, which is exactly where the newest belongs. On a phone the screen
+     then looked frozen: the first game of the day sat at the head of "the
+     last ten" all evening while the newest fell off the end.
+
+     So: the day first; then the moment it was entered, for the rounds that
+     have one; and finally the position in the database, because a round
+     added later sits later in the file. The last rule is what puts years of
+     existing rounds - all stamped noon - into the right order without
+     touching a single one of them. */
+  function entryMoment(m) {
+    if (typeof m.enteredAt === "number" && m.enteredAt > 0) return m.enteredAt;
+    var ts = typeof m.ts === "number" ? m.ts : null;
+    if (ts === null || !m.date) return ts;
+    var noon = new Date(String(m.date) + "T12:00:00").getTime();
+    /* A stamp that is simply noon of the day says nothing about the hour. */
+    return isNaN(noon) || Math.abs(ts - noon) <= 60000 ? null : ts;
+  }
+
+  function newestFirst(matches) {
+    var rows = (matches || []).map(function (m, i) { return { m: m, i: i }; });
+    rows.sort(function (a, b) {
+      var byDay = String(b.m.date || "").localeCompare(String(a.m.date || ""));
+      if (byDay) return byDay;
+      var am = entryMoment(a.m), bm = entryMoment(b.m);
+      /* A round with a real moment is placed by it; one without is left to
+         its position, and the two are not compared against each other on a
+         number only one of them has. */
+      if (am !== null && bm !== null && am !== bm) return bm - am;
+      return b.i - a.i;
+    });
+    return rows.map(function (x) { return x.m; });
+  }
+
   var api = {
     DECK: DECK, ENOUGH: ENOUGH, PRIOR_GAMES: PRIOR_GAMES,
     POOLED_TURN_GAP: POOLED_TURN_GAP, ENGINE_FAULT: ENGINE_FAULT,
@@ -950,6 +988,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     withNamedRoundsAdopted: withNamedRoundsAdopted,
     tone: tone, inTen: inTen, verdict: verdict, turnGap: turnGap,
     summary: summary,
+    entryMoment: entryMoment, newestFirst: newestFirst,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MatchupDeck = api;
@@ -1746,11 +1785,15 @@ function renderDeckView(){
 
   /* --- the last ten rounds ---------------------------------------------- */
   var waiting = pendingRounds(deck);
-  var mine = (st.matches || []).filter(function(m){
-    return !m.demo && m.myDeck === deck.id;
-  }).concat(waiting)
-   .sort(function(a,b){ return String(b.date).localeCompare(String(a.date)) || (b.ts||0)-(a.ts||0); })
-   .slice(0,10);
+  /* The order comes out of deck-core.js, the same file the app sorts its
+     match list with. Sorting on the day and the stored stamp alone is what
+     made this screen look frozen: every round played on one day carries the
+     same stamp, so the first game of the afternoon stayed at the top. */
+  var mine = MatchupDeck.newestFirst(
+    (st.matches || []).filter(function(m){
+      return !m.demo && m.myDeck === deck.id;
+    }).concat(waiting)
+  ).slice(0,10);
   var rc = el("div","card");
   rc.appendChild(el("h3",null,"Last 10 rounds")).style.cssText="margin:0 0 6px;font-size:16px";
   if(!mine.length){

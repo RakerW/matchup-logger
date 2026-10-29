@@ -1,5 +1,5 @@
 /* Keeps the Round Logger working with no signal at the venue. */
-const CACHE = 'round-logger-v2.17.1';
+const CACHE = 'round-logger-v2.19.0';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-180.png'];
 self.addEventListener('install', e =>
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));

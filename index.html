@@ -115,6 +115,11 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       <button type="button" id="newdeck" class="inline-btn">+ New deck</button></div>
     <select id="mydeck"></select>
     <p class="note" id="deckNote"></p>
+    <div id="versionWrap" hidden>
+      <label class="lbl" for="version" style="margin-top:12px;display:block">List version</label>
+      <select id="version"></select>
+      <p class="note" id="versionNote"></p>
+    </div>
     <label class="lbl" for="opp" style="margin-top:12px;display:block">Opponent deck</label>
     <select id="opp"></select>
     <div class="row" style="margin-top:12px">
@@ -166,7 +171,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       <p class="note">Use the last one before lending the phone to anyone, or if you stop using sync. It removes the saved token from this phone; it does not revoke it on GitHub.</p>
     </details>
   </div>
-  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-29 v2.17.1</p>
+  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-29 v2.19.0</p>
 </div>
 
 <div id="screen-deck" class="hidden">
@@ -1149,6 +1154,75 @@ function knownDecks(){
   var c = cfg();
   return Array.isArray(c.decks) ? c.decks : [];
 }
+
+/* What the phone needs to know about a deck: its name, so a round can be
+   placed, and its list versions, so a round says which sixty cards played
+   it. Not the cards themselves - the Deck screen keeps those separately and
+   this list is read on every save. */
+function slimDeck(d){
+  return { id: d.id, name: d.name || d.id,
+           currentVersion: d.currentVersion || null,
+           versions: (d.versions || []).map(function(v){
+             return { id: v.id, label: v.label || "", createdAt: v.createdAt || null };
+           }) };
+}
+
+function deckById(id){
+  var list = knownDecks();
+  for (var i=0;i<list.length;i++) if (list[i].id && list[i].id === id) return list[i];
+  return null;
+}
+
+/* Which version this round was played with.
+
+   The app records it on every round and compares versions against each
+   other; a round arriving from the phone without one used to land in "no
+   version attached" and quietly sat out of that comparison. The default is
+   the version the computer last said was current, which is what is in the
+   sleeves nearly every time, and the choice is remembered per deck so a few
+   rounds with an older list do not have to be set one by one. */
+function versionFor(deckId){
+  var c = cfg(), by = c.versionBy || {};
+  var d = deckById(deckId);
+  if (!d) return "";
+  var want = by[deckId];
+  var has = function(id){
+    return (d.versions || []).some(function(v){ return v.id === id; });
+  };
+  if (want === "") return "";                      // chosen on purpose
+  if (want && has(want)) return want;
+  return has(d.currentVersion) ? d.currentVersion : "";
+}
+
+function fillVersions(){
+  var wrap = $("#versionWrap"), sel = $("#version"), note = $("#versionNote");
+  var c = cfg(), d = c.deckId ? deckById(c.deckId) : null;
+  var versions = (d && d.versions) || [];
+  if (!versions.length) { wrap.hidden = true; sel.innerHTML = ""; return; }
+  wrap.hidden = false;
+  sel.innerHTML = "";
+  versions.slice().reverse().forEach(function(v){
+    sel.appendChild(new Option(v.label + (v.id === d.currentVersion ? "  (current)" : ""), v.id));
+  });
+  sel.appendChild(new Option("Not sure — leave it off", ""));
+  sel.value = versionFor(c.deckId);
+  showVersionNote();
+}
+
+function showVersionNote(){
+  var note = $("#versionNote"), c = cfg(), d = c.deckId ? deckById(c.deckId) : null;
+  if (!d) { note.textContent = ""; return; }
+  var chosen = $("#version").value;
+  note.className = "note";
+  if (!chosen) {
+    note.textContent = "The round will show as “no version attached” on the computer.";
+  } else if (chosen === d.currentVersion) {
+    note.textContent = "The version the computer last said was current. Read again on the Send "
+      + "screen if the list changed since.";
+  } else {
+    note.textContent = "An older list — this stays chosen for this deck until you change it.";
+  }
+}
 function rememberDeck(id, name){
   var c = cfg(), list = Array.isArray(c.decks) ? c.decks : [];
   var at = -1;
@@ -1174,6 +1248,7 @@ function fillDecks(){
   var want = c.deckId ? "id:" + c.deckId : (c.deckName ? "nm:" + c.deckName : "");
   sel.value = want && [].some.call(sel.options, function(o){ return o.value === want; }) ? want : "";
   showDeckNote();
+  fillVersions();
 }
 function showDeckNote(){
   var n = $("#deckNote"), c = cfg();
@@ -1281,6 +1356,10 @@ $("#save").onclick = function(){
     id: uid(),
     deckId: c0.deckId || "",
     deckName: c0.deckName || "",
+    /* Which sixty cards played this round. Empty when the deck was typed in
+       here rather than read from the computer, because then there is no
+       version to name and guessing one would be worse than saying nothing. */
+    listVersion: c0.deckId ? versionFor(c0.deckId) : "",
     opp: $("#opp").value,
     bo: draft.bo,
     games: games.map(function(g){
@@ -1537,7 +1616,7 @@ function pullDecks(quiet){
     }
     var decks = (remote && remote.config && remote.config.decks) || [];
     decks = decks.filter(function(d){ return d && d.id && !d.archived; })
-                 .map(function(d){ return { id: d.id, name: d.name || d.id }; });
+                 .map(function(d){ return slimDeck(d); });
     if(!decks.length){
       say("Read " + c.repo + ", but it holds no decks yet. Sync once " +
         "from the computer first.", "note bad");
@@ -1589,7 +1668,14 @@ function keepSnapshot(state){
           nextEvent: (state.config || {}).nextEvent,
           decks: ((state.config || {}).decks || []).map(function(d){
             return { id: d.id, name: d.name, archived: d.archived, archetype: d.archetype,
-                     list: d.list, cardClass: d.cardClass, versions: [],
+                     list: d.list, cardClass: d.cardClass,
+                     /* Labels only. The cards of every past version would be
+                        the bulk of the database, and nothing here draws
+                        them - but a round has to be able to name the list
+                        it was played with. */
+                     versions: (d.versions || []).map(function(v){
+                       return { id: v.id, label: v.label || "", createdAt: v.createdAt || null };
+                     }),
                      currentVersion: d.currentVersion };
           }),
           meta: { entries: (((state.config || {}).meta) || {}).entries || [],
@@ -1960,6 +2046,13 @@ $("#mydeck").onchange = function(){
     rememberDeck("", v.slice(3));
   }
   showDeckNote();
+  fillVersions();
+};
+
+$("#version").onchange = function(){
+  var c = cfg(), by = c.versionBy || {};
+  if (c.deckId) { by[c.deckId] = this.value; c.versionBy = by; setCfg(c); }
+  showVersionNote();
 };
 
 /* Served over https (or on localhost) the logger installs as a real offline app:

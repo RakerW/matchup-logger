@@ -864,6 +864,41 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     return wr(f) - wr(s2);
   }
 
+  /* A round recorded on the phone carries the deck's NAME, because the phone
+     may not know its id yet; the computer attaches it on arrival. Anything
+     reading the database before that has to apply the same rule, or rounds
+     that are plainly there look missing - which is exactly how they looked
+     on the phone's own deck screen. Spelling aside, a name places a round.
+     The state handed in is never altered: a reader must not rewrite the
+     database it is only looking at. */
+  function normalName(s) {
+    return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function deckByName(decks, name) {
+    var key = normalName(name);
+    if (!key) return null;
+    for (var i = 0; i < (decks || []).length; i++)
+      if (normalName(decks[i].name) === key) return decks[i];
+    return null;
+  }
+
+  function withNamedRoundsAdopted(state) {
+    var decks = ((state.config || {}).decks) || [];
+    var known = {};
+    decks.forEach(function (d) { known[d.id] = 1; });
+    var touched = false;
+    var matches = (state.matches || []).map(function (m) {
+      if (m.demo || known[m.myDeck] || !m.deckName) return m;
+      var hit = deckByName(decks, m.deckName);
+      if (!hit) return m;
+      touched = true;
+      return Object.assign({}, m, { myDeck: hit.id });
+    });
+    if (!touched) return state;
+    return Object.assign({}, state, { matches: matches });
+  }
+
   /* The headline and the three checks, which is all a phone needs: one index
      with a word for it, how often the deck gets going, how even it is across
      the field, and how much it leans on the coin flip. */
@@ -911,6 +946,8 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     turnOrder: turnOrder, score: score, interval: interval,
     isEnergy: isEnergy, marksOf: marksOf, classesOf: classesOf,
     couldBeBasic: couldBeBasic,
+    normalName: normalName, deckByName: deckByName,
+    withNamedRoundsAdopted: withNamedRoundsAdopted,
     tone: tone, inTen: inTen, verdict: verdict, turnGap: turnGap,
     summary: summary,
   };
@@ -1435,7 +1472,10 @@ function pullDecks(quiet){
   var say = function(text, cls){ if(quiet) return; msg.textContent = text; if(cls) msg.className = cls; };
   if(!quiet) msg.textContent = "Reading the deck list…";
   var transport = function(method, url, body){
-    return fetch(url, { method: method,
+    /* no-store: GitHub's contents endpoint is cacheable, and a phone that
+       answered from its own cache would show yesterday's database while
+       saying it had just read it. */
+    return fetch(url, { method: method, cache: "no-store",
       headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
                  "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined
@@ -1531,7 +1571,32 @@ function fmtDate(s){
   return d ? d.toLocaleDateString(undefined,{day:"numeric",month:"short"}) : String(s||"");
 }
 
-function deckState(){ var s = snapshot(); return s && s.state ? s.state : null; }
+function deckState(){
+  var s = snapshot();
+  if(!s || !s.state) return null;
+  /* Rounds sent from this phone sit in the database under "__phone__" with
+     the deck's name beside them until the computer next opens and attaches
+     them. Read through the same rule the computer uses, or a round played an
+     hour ago looks like it never happened. */
+  try{ return MatchupDeck.withNamedRoundsAdopted(s.state); }catch(e){ return s.state; }
+}
+
+/* Rounds still waiting on this phone are not in the database at all. They
+   belong on this screen too - they are the ones just played - but marked,
+   so it is clear which the computer has and which it has not. */
+function pendingRounds(deck){
+  var c = cfg();
+  return load().filter(function(r){
+    if(r.sent) return false;
+    if(r.deckId && deck.id && r.deckId === deck.id) return true;
+    if(r.deckName && deck.name) return MatchupDeck.normalName(r.deckName) === MatchupDeck.normalName(deck.name);
+    return !r.deckId && !r.deckName && c.deckId === deck.id;
+  }).map(function(r){
+    return { id: r.id, myDeck: deck.id, opp: r.opp, result: r.result, bo: r.bo,
+             date: r.date, ts: r.ts, note: r.note, comment: r.comment,
+             games: r.games, unsent: true };
+  });
+}
 
 function chosenDeck(){
   var st = deckState(); if(!st) return null;
@@ -1599,6 +1664,13 @@ function renderDeckView(){
     cell(wr === null ? "—" : (100*wr).toFixed(0) + "%", "win rate");
     cell(sum.games, "games");
     tc.appendChild(tot);
+    /* The figures come from the database, so rounds still waiting on this
+       phone are not in them. Saying so beats letting the list below show two
+       rounds while the count above says one. */
+    var held = pendingRounds(deck).length;
+    if(held)
+      tc.appendChild(el("p","note", held + (held===1 ? " round" : " rounds") +
+        " on this phone " + (held===1 ? "is" : "are") + " not in these figures yet — tap Send."));
     box.appendChild(tc);
   }
 
@@ -1673,9 +1745,11 @@ function renderDeckView(){
   }
 
   /* --- the last ten rounds ---------------------------------------------- */
+  var waiting = pendingRounds(deck);
   var mine = (st.matches || []).filter(function(m){
     return !m.demo && m.myDeck === deck.id;
-  }).sort(function(a,b){ return String(b.date).localeCompare(String(a.date)) || (b.ts||0)-(a.ts||0); })
+  }).concat(waiting)
+   .sort(function(a,b){ return String(b.date).localeCompare(String(a.date)) || (b.ts||0)-(a.ts||0); })
    .slice(0,10);
   var rc = el("div","card");
   rc.appendChild(el("h3",null,"Last 10 rounds")).style.cssText="margin:0 0 6px;font-size:16px";
@@ -1684,13 +1758,18 @@ function renderDeckView(){
   } else {
     var w=0,l=0,t=0;
     mine.forEach(function(m){ if(m.result==="W")w++; else if(m.result==="L")l++; else t++; });
-    rc.appendChild(el("p","note", w+"–"+l+"–"+t+" across these ten.")).style.marginTop="0";
+    var held = mine.filter(function(m){ return m.unsent; }).length;
+    rc.appendChild(el("p","note", w+"–"+l+"–"+t+" across these ten." +
+      (held ? " " + held + (held===1?" round is":" rounds are") +
+              " still on this phone — tap Send to put them in the database." : "")))
+      .style.marginTop="0";
     mine.forEach(function(m){
       var row = el("div","item");
       var left = el("div");
       left.appendChild(el("b",null,oppName(m.opp)));
       left.appendChild(el("div","meta",
         fmtDate(m.date) + " · " + (m.bo===3?"BO3":"BO1") +
+        (m.unsent ? " · on this phone, not sent yet" : "") +
         (m.note ? " · " + m.note : m.comment ? " · " + m.comment : "")));
       row.appendChild(left);
       row.appendChild(el("span","res " + (m.result||""), m.result||"?"));
@@ -1761,7 +1840,10 @@ function refreshDeckView(){
   }
   msg.textContent = "Reading…"; msg.className = "note";
   var transport = function(method, url, body){
-    return fetch(url, { method: method,
+    /* no-store: GitHub's contents endpoint is cacheable, and a phone that
+       answered from its own cache would show yesterday's database while
+       saying it had just read it. */
+    return fetch(url, { method: method, cache: "no-store",
       headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
                  "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined

@@ -87,6 +87,20 @@ textarea{min-height:66px;resize:vertical}
 .stale{background:#2a1c10;border:1px solid #6b4a1e;color:#f0d2a6;
   border-radius:11px;padding:10px 12px;font-size:13px;margin-bottom:12px}
 .readonly{color:var(--muted);font-size:12.5px;text-align:center;margin:14px 0 0}
+.totals{display:flex;flex-wrap:wrap;gap:0 18px}
+.totals div{min-width:62px;padding:6px 0}
+.totals b{display:block;font-size:21px;line-height:1.15}
+.totals span{font-size:11.5px;color:var(--muted)}
+.headline{display:flex;gap:14px;align-items:center}
+.headline .idx{font-size:40px;font-weight:800;line-height:1}
+.headline .word{font-size:16px;font-weight:700;display:block}
+.headline .of{font-size:12px;color:var(--muted)}
+.chk{display:flex;justify-content:space-between;gap:10px;align-items:baseline;
+  padding:9px 0;border-bottom:1px solid var(--line)}
+.chk:last-child{border-bottom:0}
+.chk .lab{font-size:13px;color:var(--muted)}
+.chk .val{font-weight:700;font-size:15px}
+.good-t{color:var(--win)} .warn-t{color:var(--tie)} .bad-t{color:var(--loss)}
 .count{background:var(--accent);border-radius:999px;padding:1px 8px;font-size:12px;margin-left:6px}
 details summary{min-height:var(--tap);display:flex;align-items:center;cursor:pointer;color:var(--muted);font-size:14px}
 </style>
@@ -166,9 +180,9 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
 </div>
 
 <div class="bar">
-  <button id="tabdeck">Deck</button>
-  <button id="tabsync">Send<span class="count" id="badge">0</span></button>
   <button id="save">Save round</button>
+  <button id="tabsync">Send<span class="count" id="badge">0</span></button>
+  <button id="tabdeck">Deck</button>
 </div>
 
 <script>/* Matchup Lab — shared merge logic. Source of the copy inlined in the phone
@@ -572,6 +586,336 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   var api = { compute: compute, planEvent: planEvent, asDate: asDate, LOCK_DAYS: LOCK_DAYS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MatchupPlan = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+<script>/* Matchup Lab — what a deck is, in numbers.
+ *
+ * The card maths and the reading of recorded games, with no screen attached.
+ * Two surfaces need these answers: the Consistency page in the app, and the
+ * read-only deck view in the phone logger, which this file is inlined into
+ * at build time. One copy, so the two can never quietly disagree - the same
+ * reason plan-core.js and merge.js live apart from the pages that draw them.
+ *
+ *   MatchupDeck.summary(state, deckId)  ->  the headline and the three checks
+ *
+ * Everything else is exported too, because the Consistency page builds the
+ * rest of its screen from the same pieces.
+ */
+(function (root) {
+  "use strict";
+
+  var DECK = 60;
+  var PRIOR_GAMES = 15;          // how much play it takes to outweigh the list
+  var POOLED_TURN_GAP = 0.11;    // the format's own advantage for going first
+  var ENOUGH = 25;               // below this, the index is provisional
+  var FIELD_SIZE = 15;           // how much of the metagame to measure
+
+  var ENGINE_FAULT = { start: 1, draw: 1, donk: 1, deck: 1, brick: 1 };
+
+  /* "Engine" here is both halves of it: cards that FIND what you need and
+     cards that REFILL the hand. A deck full of Ultra Balls and no supporter
+     digs itself empty by turn three; a deck of draw supporters and no search
+     draws cards it cannot use. The two are marked apart for that reason, and
+     the maths asks for two engine cards of either kind. */
+  var SEARCH_GUESS = /^(ultra|nest|quick|buddy-buddy|great|level) ball|^earthen vessel|^arven$|^energy (search|retrieval)/i;
+  var DRAW_GUESS = /^professor'?s research|^iono$|^colress'?s experiment|^pok[eé]gear|^trekking shoes|^bills? transfer|^judge$|^cynthia/i;
+
+  // ---- combinatorics ----------------------------------------------------
+  function comb(n, k) {
+    if (k < 0 || k > n) return 0;
+    k = Math.min(k, n - k);
+    var out = 1;
+    for (var i = 1; i <= k; i++) out = (out * (n - k + i)) / i;
+    return out;
+  }
+
+  /* P(the first `drawn` cards hold at least need[i] of each class).
+     Exact: walks every split of the draw across the disjoint classes. */
+  function pMeets(counts, drawn, need) {
+    var total = comb(DECK, drawn);
+    if (!total) return 0;
+    function walk(i, left) {
+      if (i === counts.length) return left === 0 ? 1 : 0;
+      var out = 0;
+      var top = Math.min(counts[i], left);
+      for (var k = need[i] || 0; k <= top; k++) out += comb(counts[i], k) * walk(i + 1, left - k);
+      return out;
+    }
+    return walk(0, drawn) / total;
+  }
+
+  /* L — the chance the deck simply functions by the end of your second turn,
+     given a keepable hand. Eight cards seen on the play, nine on the draw. */
+  function listConsistency(basic, engine, energy) {
+    var rest = DECK - basic - engine - energy;
+    if (rest < 0 || basic <= 0) return null;
+    var counts = [basic, engine, energy, rest];
+    var out = [];
+    [8, 9].forEach(function (d) {
+      var keep = pMeets(counts, d, [1, 0, 0, 0]);
+      out.push(keep ? pMeets(counts, d, [1, 2, 1, 0]) / keep : 0);
+    });
+    return (out[0] + out[1]) / 2;
+  }
+
+  /* The stricter question: a Basic, something to FIND with, something to
+     DRAW with, and an energy. This is the hand a player actually wants. */
+  function completeStart(basic, search, draw, energy) {
+    var rest = DECK - basic - search - draw - energy;
+    if (rest < 0 || basic <= 0 || !search || !draw) return null;
+    var counts = [basic, search, draw, energy, rest];
+    var out = [];
+    [8, 9].forEach(function (d) {
+      var keep = pMeets(counts, d, [1, 0, 0, 0, 0]);
+      out.push(keep ? pMeets(counts, d, [1, 1, 1, 1, 0]) / keep : 0);
+    });
+    return (out[0] + out[1]) / 2;
+  }
+
+  function mulligan(basics) {
+    var p = comb(DECK - basics, 7) / comb(DECK, 7);
+    return { p: p, given: p / (1 - p) };
+  }
+
+  function atLeastOne(copies, drawn) {
+    return 1 - comb(DECK - copies, drawn) / comb(DECK, drawn);
+  }
+
+  // ---- what actually happened -------------------------------------------
+  function gamesOf(matches) {
+    var out = [];
+    matches.forEach(function (m) {
+      (m.games || []).forEach(function (g) {
+        out.push({ r: g.r, reason: g.reason || "", first: g.first, opp: m.opp, match: m.id,
+                   /* what was written about this game or the round it sat in,
+                      so a loss explained in words is not called unexplained */
+                   note: g.note || "", comment: (m.comment || "") + " " + (m.note || "") });
+      });
+    });
+    return out;
+  }
+  function engineReliability(games, L) {
+    var losses = games.filter(function (g) { return g.r === "L"; });
+    var named = losses.filter(function (g) { return g.reason; });
+    var faults = named.filter(function (g) { return ENGINE_FAULT[g.reason]; }).length;
+    /* Losses with no reason written down are split the way the named ones
+       were, rather than counted as blameless. Coverage is shown, because
+       that assumption is only as good as the habit of filling them in. */
+    var share = named.length ? faults / named.length : 1 - L;
+    var b = faults + (losses.length - named.length) * share;
+    var p = (b + PRIOR_GAMES * (1 - L)) / (games.length + PRIOR_GAMES);
+    return {
+      c1: 1 - p,
+      bricks: b,
+      faults: faults,
+      losses: losses.length,
+      coverage: losses.length ? named.length / losses.length : 1,
+    };
+  }
+
+  /* C2 — even across the field, or feast and famine? Pearson dispersion
+     against a single true rate, pulled towards 1 while the sample is thin. */
+  function spread(games) {
+    var by = {};
+    games.forEach(function (g) { (by[g.opp] = by[g.opp] || []).push(g.r === "W" ? 1 : 0); });
+    var groups = Object.keys(by).map(function (k) { return by[k]; })
+      .filter(function (v) { return v.length >= 2; });
+    if (groups.length < 3) return null;
+    var wins = 0, n = 0;
+    groups.forEach(function (v) { v.forEach(function (x) { wins += x; n++; }); });
+    var p = wins / n;
+    if (p <= 0 || p >= 1) return 1;
+    var chi = 0;
+    groups.forEach(function (v) {
+      var k = v.reduce(function (a, b) { return a + b; }, 0);
+      chi += Math.pow(k - v.length * p, 2) / (v.length * p * (1 - p));
+    });
+    var phi = (chi + 4) / (groups.length - 1 + 4);
+    return Math.max(0.3, 1 / Math.sqrt(Math.max(1, phi)));
+  }
+
+  /* C3 — how much the deck leans on winning the flip, measured against the
+     advantage the format gives everybody rather than against zero. */
+  function turnOrder(games) {
+    var f = games.filter(function (g) { return g.first === true; });
+    var s = games.filter(function (g) { return g.first === false; });
+    if (f.length < 3 || s.length < 3) return null;
+    var wr = function (a) {
+      return a.filter(function (g) { return g.r === "W"; }).length / a.length;
+    };
+    var raw = wr(f) - wr(s);
+    var k = (f.length + s.length) / (f.length + s.length + 12);
+    var gap = k * raw + (1 - k) * POOLED_TURN_GAP;
+    return Math.max(0.3, 1 - Math.max(0, gap - POOLED_TURN_GAP) / 0.35);
+  }
+
+  function score(games, L) {
+    var e = engineReliability(games, L);
+    var c2 = spread(games), c3 = turnOrder(games);
+    var parts = [[e.c1, 0.5]];
+    if (c2 !== null) parts.push([c2, 0.3]);
+    if (c3 !== null) parts.push([c3, 0.2]);
+    var w = parts.reduce(function (a, p) { return a + p[1]; }, 0);
+    var v = 1;
+    parts.forEach(function (p) { v *= Math.pow(Math.max(p[0], 1e-6), p[1] / w); });
+    return { index: 100 * v, c1: e.c1, c2: c2, c3: c3, engine: e };
+  }
+
+  /* The spread of the index itself. Matches are resampled whole, because the
+     games inside one match are not independent of each other. */
+  function interval(matches, L) {
+    if (matches.length < 4) return null;
+    var vals = [];
+    for (var r = 0; r < 200; r++) {
+      var pick = [];
+      for (var i = 0; i < matches.length; i++)
+        pick.push(matches[(Math.random() * matches.length) | 0]);
+      var g = gamesOf(pick);
+      if (g.length) vals.push(score(g, L).index);
+    }
+    if (vals.length < 50) return null;
+    vals.sort(function (a, b) { return a - b; });
+    return [vals[Math.floor(vals.length * 0.1)], vals[Math.floor(vals.length * 0.9)]];
+  }
+
+
+  /* A list fetched from Limitless carries the card's group; one typed or
+     pasted into the app does not, because the export format does not say.
+     So energy is recognised by name as well, and where the group is unknown
+     both marks are offered rather than guessing the card is a Trainer. */
+  function isEnergy(c) {
+    return c.group === "energy" || /\bEnergy$/i.test(c.name || "");
+  }
+
+  function couldBeBasic(c) {
+    return !isEnergy(c) && (!c.group || c.group === "pokemon");
+  }
+
+  function marksOf(d, c) {
+    var m = (d.cardClass || {})[c.name] || {};
+    var energy = isEnergy(c) || m.energy === true;
+    /* An older mark said only "engine"; treat it as search unless the card
+       looks like draw, so nothing ticked before this split is lost. */
+    var legacy = m.engine === true;
+    return {
+      basic: !!m.basic && !energy,
+      search: energy ? false
+        : m.search !== undefined ? !!m.search
+        : legacy ? !DRAW_GUESS.test(c.name || "") : SEARCH_GUESS.test(c.name || ""),
+      draw: energy ? false
+        : m.draw !== undefined ? !!m.draw
+        : legacy ? DRAW_GUESS.test(c.name || "") : DRAW_GUESS.test(c.name || ""),
+      energy: energy,
+      mine: m.by === "me",
+    };
+  }
+
+  function classesOf(d) {
+    var basic = 0, search = 0, draw = 0, energy = 0, total = 0, rows = [];
+    (d.list || []).forEach(function (c) {
+      var m = marksOf(d, c);
+      total += c.n;
+      if (m.energy) energy += c.n;
+      else if (m.basic) basic += c.n;          // a card that is both counts once
+      else if (m.search) search += c.n;
+      else if (m.draw) draw += c.n;
+      rows.push({ card: c, basic: m.basic, search: m.search, draw: m.draw, energy: m.energy });
+    });
+    return { basic: basic, search: search, draw: draw, engine: search + draw,
+             energy: energy, total: total, rows: rows };
+  }
+
+  /* ---- saying it plainly ------------------------------------------------
+     The person reading this is a teenager between rounds, not a statistician.
+     Every number is therefore also given as "x games in 10", the three checks
+     carry a colour, and the arithmetic that produced them is folded away
+     until it is asked for. */
+
+  function tone(v) { return v >= 0.85 ? "good" : v >= 0.7 ? "warn" : "bad"; }
+
+  function inTen(v) { return Math.round(v * 10); }
+
+  /* The word describes the weakest of the three checks, not the average of
+     them. An index of 86 held up by an even matchup spread, while the deck
+     still fails to start three games in ten, is not "rock solid" to the
+     person shuffling it — and the sentence underneath would contradict it. */
+  function verdict(s, games) {
+    var weakest = [s.c1, s.c2, s.c3].reduce(function (a, v) {
+      return v === null || v === undefined ? a : Math.min(a, v);
+    }, 1);
+    /* A dozen games cannot earn a verdict of any kind, and "Unreliable" on
+       eight of them would be read as a fact about the deck. */
+    if (games < 12) return { word: "Early days", cls: "warn" };
+    var word = weakest >= 0.85 ? "Rock solid"
+      : weakest >= 0.75 ? "Good, with one weak spot"
+      : weakest >= 0.65 ? "Shaky" : "Unreliable";
+    /* The headline takes its colour from the same scale as the check that
+       earned it, so an amber check never sits under a green verdict. */
+    return { word: word, cls: tone(weakest) };
+  }
+
+  function turnGap(games) {
+    var f = games.filter(function (g) { return g.first === true; });
+    var s2 = games.filter(function (g) { return g.first === false; });
+    if (f.length < 3 || s2.length < 3) return null;
+    var wr = function (a) {
+      return a.filter(function (g) { return g.r === "W"; }).length / a.length;
+    };
+    return wr(f) - wr(s2);
+  }
+
+  /* The headline and the three checks, which is all a phone needs: one index
+     with a word for it, how often the deck gets going, how even it is across
+     the field, and how much it leans on the coin flip. */
+  function summary(state, deckId) {
+    var decks = ((state.config || {}).decks) || [];
+    var d = decks.filter(function (x) { return x.id === deckId; })[0] || decks[0];
+    if (!d) return null;
+    var c = classesOf(d);
+    var L = c.total === DECK ? listConsistency(c.basic, c.engine, c.energy) : null;
+    var ms = (state.matches || []).filter(function (m) {
+      return !m.demo && m.myDeck === d.id;
+    });
+    var games = gamesOf(ms);
+    var s = L !== null && games.length ? score(games, L) : null;
+    return {
+      deck: d,
+      counts: c,
+      L: L,
+      mulligan: c.basic ? mulligan(c.basic).p : null,
+      rounds: ms.length,
+      games: games.length,
+      enough: ENOUGH,
+      score: s,
+      verdict: s ? verdict(s, games.length) : null,
+      interval: s ? interval(ms, L) : null,
+      turnGap: s ? turnGap(games) : null,
+      /* The plain-words results of the same rounds, so a phone does not have
+         to count wins a second time to show a record. */
+      record: ms.reduce(function (a, m) {
+        if (m.result === "W") a.w++;
+        else if (m.result === "L") a.l++;
+        else a.t++;
+        return a;
+      }, { w: 0, l: 0, t: 0 }),
+    };
+  }
+
+  var api = {
+    DECK: DECK, ENOUGH: ENOUGH, PRIOR_GAMES: PRIOR_GAMES,
+    POOLED_TURN_GAP: POOLED_TURN_GAP, ENGINE_FAULT: ENGINE_FAULT,
+    SEARCH_GUESS: SEARCH_GUESS, DRAW_GUESS: DRAW_GUESS,
+    comb: comb, pMeets: pMeets, listConsistency: listConsistency,
+    completeStart: completeStart, mulligan: mulligan, atLeastOne: atLeastOne,
+    gamesOf: gamesOf, engineReliability: engineReliability, spread: spread,
+    turnOrder: turnOrder, score: score, interval: interval,
+    isEnergy: isEnergy, marksOf: marksOf, classesOf: classesOf,
+    couldBeBasic: couldBeBasic,
+    tone: tone, inTen: inTen, verdict: verdict, turnGap: turnGap,
+    summary: summary,
+  };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.MatchupDeck = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
 </script>
 <script>/* Matchup Lab — GitHub-backed store for the mobile edition.
@@ -1229,6 +1573,79 @@ function renderDeckView(){
   }
   var deck = chosenDeck();
   if(!deck){ box.appendChild(el("div","card","No decks in the database yet.")); return; }
+
+  /* The same two summaries the computer shows: the dashboard's totals, and
+     the headline and three checks from Consistency. Both come out of
+     deck-core.js, the file the app reads them from, so the phone cannot
+     quietly report a different number. */
+  var sum = null;
+  try{ sum = MatchupDeck.summary(st, deck.id); }catch(e){ sum = null; }
+
+  if(sum){
+    var tc = el("div","card");
+    var tot = el("div","totals");
+    var cell = function(value, label, cls){
+      var d = el("div");
+      d.appendChild(el("b", cls || null, String(value)));
+      d.appendChild(el("span", null, label));
+      tot.appendChild(d);
+    };
+    var r = sum.record, n = sum.rounds;
+    var wr = n ? (r.w + 0.5*r.t) / n : null;
+    cell(n, "rounds");
+    cell(r.w, "won", "good-t");
+    cell(r.l, "lost", "bad-t");
+    cell(r.t, "tied", r.t ? "warn-t" : null);
+    cell(wr === null ? "—" : (100*wr).toFixed(0) + "%", "win rate");
+    cell(sum.games, "games");
+    tc.appendChild(tot);
+    box.appendChild(tc);
+  }
+
+  if(sum && sum.score){
+    var hc = el("div","card");
+    var v = sum.verdict, tone = v.cls === "good" ? "good-t" : v.cls === "warn" ? "warn-t" : "bad-t";
+    var head = el("div","headline");
+    head.appendChild(el("span","idx " + tone, sum.score.index.toFixed(0)));
+    var side = el("div");
+    side.appendChild(el("span","word", v.word));
+    side.appendChild(el("span","of","out of 100"));
+    head.appendChild(side);
+    hc.appendChild(head);
+    hc.appendChild(el("p","note",
+      "Out of 10 games this deck fails to get going in about " +
+      MatchupDeck.inTen(1 - sum.score.c1) + ". " + sum.games + " games recorded" +
+      (sum.interval ? ", so the true figure is somewhere around " +
+        sum.interval[0].toFixed(0) + "–" + sum.interval[1].toFixed(0) : "") +
+      (sum.games < sum.enough ? ". Under " + sum.enough +
+        " games this still leans on the card maths." : ".")));
+    var chk = function(label, value, v2){
+      var row = el("div","chk");
+      row.appendChild(el("span","lab",label));
+      row.appendChild(el("span","val " + (MatchupDeck.tone(v2) === "good" ? "good-t"
+        : MatchupDeck.tone(v2) === "warn" ? "warn-t" : "bad-t"), value));
+      hc.appendChild(row);
+    };
+    chk("Gets going", MatchupDeck.inTen(sum.score.c1) + " in 10", sum.score.c1);
+    if(sum.score.c2 !== null)
+      chk("Same against everyone",
+          sum.score.c2 >= 0.85 ? "steady" : sum.score.c2 >= 0.7 ? "a bit swingy" : "feast or famine",
+          sum.score.c2);
+    if(sum.score.c3 !== null)
+      chk("Going second",
+          sum.score.c3 >= 0.9 ? "no real problem" : "leans on going first",
+          sum.score.c3);
+    box.appendChild(hc);
+  } else if(sum && sum.L !== null){
+    var lc = el("div","card");
+    lc.appendChild(el("p","note","No rounds with this deck yet. From the card maths alone, " +
+      MatchupDeck.inTen(sum.L) + " openings in 10 work."));
+    box.appendChild(lc);
+  } else if(sum && sum.counts.total !== 60){
+    var wc = el("div","card");
+    wc.appendChild(el("p","note", sum.counts.total + " cards in this list — the maths needs 60."));
+    box.appendChild(wc);
+  }
 
   /* --- the plan, if an event is set ------------------------------------- */
   var plan = null;

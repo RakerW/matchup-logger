@@ -46,7 +46,8 @@ textarea{min-height:66px;resize:vertical}
   display:flex;gap:8px;backdrop-filter:blur(8px)}
 .bar button{flex:1;min-height:var(--tap);border-radius:12px;border:0;font-weight:700;font-size:16px}
 #save{background:var(--accent);color:#fff}
-#tabsync{background:#15132a;color:var(--ink);border:1px solid var(--line);flex:0 0 42%}
+#tabsync,#tabdeck{background:#15132a;color:var(--ink);border:1px solid var(--line);
+  flex:0 0 auto;padding:0 14px;font-size:15px}
 .calm-btn,.danger-btn{margin-top:10px;min-height:var(--tap);width:100%;border-radius:12px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-weight:600;font-size:15px}
 .calm-btn{color:var(--ink)}
 .warn-note{color:var(--tie)}
@@ -70,6 +71,22 @@ textarea{min-height:66px;resize:vertical}
 .warn{background:#2a1c10;border-color:#6b4a1e;color:#f0d2a6}
 .ok{color:var(--win)} .bad{color:var(--loss)}
 .hidden{display:none}
+.deck-h{font-size:14px;margin:16px 0 6px;color:var(--muted);font-weight:600;
+  text-transform:uppercase;letter-spacing:.06em}
+.deck-h:first-child{margin-top:0}
+.cardrow{display:flex;gap:10px;align-items:baseline;padding:8px 0;
+  border-bottom:1px solid var(--line);font-size:15px}
+.cardrow:last-child{border-bottom:0}
+.cardrow .n{flex:0 0 26px;text-align:right;font-weight:700;color:var(--accent)}
+.cardrow .set{color:var(--muted);font-size:12px}
+.planrow{display:flex;gap:12px;align-items:flex-start;padding:10px 0;
+  border-bottom:1px solid var(--line)}
+.planrow:last-child{border-bottom:0}
+.planrow .n{flex:0 0 26px;text-align:right;font-weight:800;font-size:18px;color:var(--accent)}
+.planrow b{display:block;font-size:15px}
+.stale{background:#2a1c10;border:1px solid #6b4a1e;color:#f0d2a6;
+  border-radius:11px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+.readonly{color:var(--muted);font-size:12.5px;text-align:center;margin:14px 0 0}
 .count{background:var(--accent);border-radius:999px;padding:1px 8px;font-size:12px;margin-left:6px}
 details summary{min-height:var(--tap);display:flex;align-items:center;cursor:pointer;color:var(--muted);font-size:14px}
 </style>
@@ -117,7 +134,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     <button id="connect" style="margin-top:14px;min-height:var(--tap);width:100%;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:700">Save and send now</button>
     <button id="loaddecks" class="calm-btn">Load my decks from the database</button>
     <p class="note" id="syncMsg"></p>
-    <p class="note"><b>Worth knowing.</b> On this page the token has to live in the phone's browser storage, which is weaker than the desktop app, where it never reaches the page at all. Use a token limited to this one repository, and revoke it on GitHub if the phone is lost.</p>
+    <p class="note"><b>Worth knowing.</b> On this page the token has to live in the phone's browser storage, which is weaker than the desktop app, where it never reaches the page at all. The Deck screen also keeps a copy of your decks and recent rounds there, so it still works without a signal. Use a token limited to this one repository, revoke it on GitHub if the phone is lost, and use <b>Forget repository and token</b> below to clear both.</p>
   </div>
   <div class="card">
     <h3 style="margin:0 0 6px;font-size:15px">Or move a file by hand</h3>
@@ -138,21 +155,34 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-24 v2.7</p>
 </div>
 
+<div id="screen-deck" class="hidden">
+  <div class="card">
+    <label class="lbl" for="deckview">Deck</label>
+    <select id="deckview"></select>
+    <p class="note" id="deckMsg"></p>
+  </div>
+  <div id="deckBody"></div>
+  <p class="readonly">This screen only reads. Nothing here can be changed from the phone.</p>
+</div>
+
 <div class="bar">
+  <button id="tabdeck">Deck</button>
   <button id="tabsync">Send<span class="count" id="badge">0</span></button>
   <button id="save">Save round</button>
 </div>
 
-<script>/* Matchup Lab — shared merge logic.
+<script>/* Matchup Lab — shared merge logic. Source of the copy inlined in the phone
+ * logger and used by the Mac app; edit it here, never in the built page.
  *
- * A faithful port of merge_states / merge_configs / tombstones_for in sync.py.
- * Both run against the same file, so any disagreement silently corrupts the
- * database. Three details carry the risk and are why this uses Map:
- *   - a plain JS object reorders keys that look like integers, which would
- *     change entry order before the (stable) sort;
- *   - _by_id advances its index over non-object items it skips;
- *   - the demo-deck cull re-checks the deck count as it removes, so it can
- *     never remove the last deck.
+ * A port of merge_states / merge_configs / tombstones_for in storage.py. Both
+ * run against the same file, so any disagreement silently corrupts the
+ * database - and one did: this side read a deletion only under a bare id
+ * while the computer writes "<kind>:<id>", so a round deleted on the computer
+ * came back the next time a phone published. tests/merge_cases.json is the
+ * contract, run against both implementations before every release.
+ *
+ * Map, not a plain object: object keys that look like integers get reordered,
+ * which would change entry order before the (stable) sort.
  */
 (function (root) {
   "use strict";
@@ -171,80 +201,139 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
 
   function num(v) { return v ? v : 0; }
 
+  /* The starter deck the app makes on first run, with nothing put in it yet.
+     Mirrors untouched_deck() in storage.py and must stay in step with it. */
+  var STARTER_NAMES = ["My first deck"];
+  function untouchedDeck(d) {
+    if (!d || typeof d !== "object") return false;
+    if (STARTER_NAMES.indexOf(String(d.name || "").trim()) < 0) return false;
+    return !(d.list || (d.versions && d.versions.length) || d.cardClass);
+  }
+
+  /* A deletion is stamped "<kind>:<id>" by the computer and, in older
+     databases, as a bare id. Both forms count, and the stamp is a moment in
+     time: an entry saved after it was deleted is a new entry and comes back. */
+  function tombstoneAt(tombs, kind, id) {
+    var a = Object.prototype.hasOwnProperty.call(tombs, kind + ":" + id) ? num(tombs[kind + ":" + id]) : -1;
+    var b = Object.prototype.hasOwnProperty.call(tombs, id) ? num(tombs[id]) : -1;
+    return a > b ? a : b;
+  }
+
+  function groups(state) {
+    state = state || {};
+    return {
+      matches: state.matches || [],
+      drills: state.drills || [],
+      trash: state.trash || [],
+      decks: ((state.config || {}).decks) || []
+    };
+  }
+
   function mergeStates(a, b) {
     a = a || {}; b = b || {};
     var tombs = Object.assign({}, a._tombstones || {});
     var bt = b._tombstones || {};
     Object.keys(bt).forEach(function (k) {
-      if (bt[k] > (tombs[k] || 0)) tombs[k] = bt[k];
+      if (num(bt[k]) > num(tombs[k])) tombs[k] = bt[k];
     });
 
-    function union(key) {
-      var merged = byId(a[key]);
-      byId(b[key]).forEach(function (v, k) { merged.set(k, v); });
+    /* Winner per entry, by the entry's own timestamp - not by which side's
+       database was written last. A phone saved at noon still must not push
+       its morning copy of a list over an edit made at eleven. */
+    function union(kind) {
+      var picked = new Map();
+      [a, b].forEach(function (state) {
+        byId(groups(state)[kind]).forEach(function (item, id) {
+          var held = picked.get(id);
+          if (held === undefined) { picked.set(id, item); return; }
+          if (kind === "decks" && untouchedDeck(held) !== untouchedDeck(item)) {
+            // an empty starter never wins against a real deck, whatever the clock says
+            picked.set(id, untouchedDeck(held) ? item : held);
+            return;
+          }
+          picked.set(id, num(item._modifiedAt) > num(held._modifiedAt) ? item : held);
+        });
+      });
       var out = [];
-      merged.forEach(function (v, k) {
-        if (!Object.prototype.hasOwnProperty.call(tombs, k)) out.push(v);
+      picked.forEach(function (v, id) {
+        if (num(v._modifiedAt) > tombstoneAt(tombs, kind, id)) out.push(v);
+      });
+      out.sort(function (x, y) {
+        return (num(x.ts) - num(y.ts)) || String(x.id).localeCompare(String(y.id));
       });
       return out;
     }
 
-    var newer = num(a._updatedAt) >= num(b._updatedAt) ? a : b;
-    var older = newer === a ? b : a;
-    var matches = union("matches").sort(function (x, y) { return num(x.ts) - num(y.ts); });
-    var drills  = union("drills").sort(function (x, y) { return num(x.ts) - num(y.ts); });
+    var matches = union("matches");
+    var drills = union("drills");
+    var trash = union("trash");
+    var decks = union("decks");
 
-    return {
-      config: mergeConfigs(newer.config, older.config, matches),
+    var out = {
+      schemaVersion: 2,
+      config: mergeConfigs(a.config, b.config, matches, drills, trash, decks,
+                           num(a._updatedAt) >= num(b._updatedAt) ? a.config : b.config),
       matches: matches,
       drills: drills,
+      trash: trash,
       _updatedAt: Math.max(num(a._updatedAt), num(b._updatedAt)),
+      _configUpdatedAt: Math.max(num(a._configUpdatedAt) || num(a._updatedAt),
+                                 num(b._configUpdatedAt) || num(b._updatedAt)),
       _tombstones: tombs
     };
+
+    /* Conflicts, and the record of which were settled, belong to the computer:
+       telling a real divergence from a sequential edit needs a hash of the card
+       list, which this cannot do in a browser. So it never invents one - but it
+       carries through every conflict it was handed, because publishing from a
+       phone must not quietly erase that history. */
+    var conflicts = new Map();
+    [a, b].forEach(function (s) {
+      (s._conflicts || []).forEach(function (c) {
+        if (c && typeof c === "object" && c.id) conflicts.set(c.id, c);
+      });
+    });
+    if (conflicts.size) out._conflicts = Array.from(conflicts.values())
+      .sort(function (x, y) { return String(x.id).localeCompare(String(y.id)); });
+    var settled = {};
+    [a, b].forEach(function (s) { (s._resolvedConflicts || []).forEach(function (id) { settled[id] = 1; }); });
+    var settledIds = Object.keys(settled).sort();
+    if (settledIds.length) out._resolvedConflicts = settledIds;
+    return out;
   }
 
   function isEmpty(o) { return !o || Object.keys(o).length === 0; }
 
-  function mergeConfigs(newer, older, matches) {
-    newer = Object.assign({}, newer || {});
-    older = Object.assign({}, older || {});
-    if (isEmpty(newer)) return older;
+  function mergeConfigs(ca, cb, matches, drills, trash, decks, newest) {
+    var merged = Object.assign({}, isEmpty(newest) ? (isEmpty(ca) ? cb : ca) : newest);
 
-    var decks = new Map();
-    (older.decks || []).forEach(function (d) {
-      if (d && typeof d === "object" && d.id) decks.set(d.id, d);
-    });
-    (newer.decks || []).forEach(function (d) {
-      if (d && typeof d === "object" && d.id) decks.set(d.id, d);
-    });
-
-    var counts = new Map();
-    (matches || []).forEach(function (m) {
-      var k = m && m.myDeck;
-      if (k) counts.set(k, (counts.get(k) || 0) + 1);
+    /* Which decks something was actually recorded against. A round names the
+       player's own deck in myDeck; only a drill calls the field deck. The
+       trash counts too - a deleted round can be restored. */
+    var used = new Map();
+    function note(k) { if (k) used.set(k, (used.get(k) || 0) + 1); }
+    (matches || []).forEach(function (m) { note(m && m.myDeck); });
+    (drills || []).forEach(function (d) { note(d && d.deck); });
+    (trash || []).forEach(function (t) {
+      if (t && t.kind === "match" && t.item) note(t.item.myDeck);
     });
 
-    if (decks.size > 1) {
-      Array.from(decks.keys()).forEach(function (did) {
-        var d = decks.get(did);
-        if (!counts.get(did) && d && d.demoList && decks.size > 1) decks.delete(did);
-      });
-    }
+    /* A starter or sample deck beside real ones is a leftover from a computer
+       that was set up and then pointed at an existing database. It goes,
+       unless something was recorded against it. */
+    var kept = (decks || []).filter(function (d) {
+      if (!d || !d.id) return false;
+      if (used.get(d.id)) return true;
+      return !(untouchedDeck(d) || d.demoList);
+    });
+    merged.decks = (kept.length && (decks || []).length > 1) ? kept : (decks || []);
 
-    var merged = Object.assign({}, newer);
-    var deckList = Array.from(decks.values());
-    merged.decks = deckList.length ? deckList
-                 : ((newer.decks && newer.decks.length) ? newer.decks : (older.decks || []));
-
-    var active = merged.active;
-    if (!decks.has(active) || !counts.get(active)) {
-      if (counts.size) {
-        var best = null, bestN = -Infinity;
-        counts.forEach(function (n, k) { if (n > bestN) { bestN = n; best = k; } });
-        if (decks.has(best)) active = best;
-      }
-      if (!decks.has(active) && merged.decks.length) active = merged.decks[0].id;
-      merged.active = active;
+    var have = {};
+    merged.decks.forEach(function (d) { have[d.id] = 1; });
+    if (!have[merged.active]) {
+      var best = null, bestN = -Infinity;
+      used.forEach(function (n, k) { if (have[k] && n > bestN) { bestN = n; best = k; } });
+      merged.active = best || (merged.decks.length ? merged.decks[0].id : null);
     }
     return merged;
   }
@@ -253,12 +342,11 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     var now = nowMs === undefined ? Date.now() : nowMs;
     var tombs = Object.assign({}, (previous || {})._tombstones || {});
     ["matches", "drills"].forEach(function (key) {
-      var prev = byId((previous || {})[key]);
-      var inc = byId((incoming || {})[key]);
-      prev.forEach(function (_v, id) { if (!inc.has(id)) tombs[id] = now; });
-    });
-    ["matches", "drills"].forEach(function (key) {
-      byId((incoming || {})[key]).forEach(function (_v, id) { delete tombs[id]; });
+      var prev = byId(groups(previous)[key]);
+      var inc = byId(groups(incoming)[key]);
+      // the same "<kind>:<id>" the computer writes, so either side can read it
+      prev.forEach(function (_v, id) { if (!inc.has(id)) tombs[key + ":" + id] = now; });
+      inc.forEach(function (_v, id) { delete tombs[key + ":" + id]; delete tombs[id]; });
     });
     return tombs;
   }
@@ -266,6 +354,224 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   var api = { mergeStates: mergeStates, mergeConfigs: mergeConfigs, tombstonesFor: tombstonesFor };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MatchupMerge = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+<script>/* Matchup Lab — what to practise before a named event.
+ *
+ * The arithmetic only. It is kept apart from the screen that draws it
+ * because two surfaces need the answer: the app, and the read-only deck view
+ * in the phone logger, which this file is inlined into at build time. The
+ * merge logic taught us what happens when one rule gets written twice in two
+ * languages - a round deleted on the computer came back from the phone - so
+ * there is one copy of this, and tests/plan_rules.js runs against it.
+ *
+ *   MatchupPlan.compute(state, { now })  ->  the plan, or null
+ *
+ * `state` is the database as it sits in data.json: config.decks,
+ * config.meta.entries, config.nextEvent, config.target and matches.
+ */
+(function (root) {
+  "use strict";
+
+  var MEET_AT = 3; // rounds that turn "never played" into a first impression
+  var READ_AT = 10; // rounds that turn a first impression into something to act on
+  var ONE_CAP = 4; // never ask for more than this against one archetype
+  var RESERVE = 0.2; // part of the capacity left free for whatever comes up
+  var LOCK_DAYS = 5; // the list stops changing this many days out
+  /* Two limits that keep the plan a plan. Without the first, the queue of
+     decks never met swallows the whole capacity and the matchups actually
+     being lost never appear; without the second, a wide field turns the page
+     into a list of twenty archetypes nobody is going to work through. */
+  var MEET_SHARE = 0.6;
+  var MAX_TARGETS = 5;
+
+  function midnight(d) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function asDate(s) {
+    var p = String(s || "").split("-");
+    if (p.length !== 3) return null;
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function daysBetween(a, b) {
+    return Math.round((b - a) / 86400000);
+  }
+
+  function planEvent(state) {
+    var e = state && state.config && state.config.nextEvent;
+    if (!e || !e.name || !asDate(e.date)) return null;
+    return e;
+  }
+
+  function roundsOf(state, deckId) {
+    return (state.matches || []).filter(function (m) {
+      return !m.demo && m.myDeck === deckId && asDate(m.date);
+    });
+  }
+
+  /* How many rounds actually get recorded in a week. Measured, not asked
+     for: a plan built on wishes is a list of things that will not happen. */
+  function pace(rounds, now) {
+    if (!rounds.length) return { week: 0, rounds: 0 };
+    var days = rounds.map(function (m) {
+      return asDate(m.date).getTime();
+    });
+    var last = Math.max.apply(null, days),
+      first = Math.min.apply(null, days);
+    /* Only the last six weeks count, and the window runs to today rather
+       than to the last round: a deck left alone for a month is not still
+       being played seven times a week. */
+    var end = Math.max(last, now.getTime());
+    var since = Math.max(first, end - 42 * 86400000);
+    var recent = days.filter(function (t) {
+      return t >= since;
+    });
+    var span = Math.max(7, daysBetween(new Date(since), new Date(end)) + 1);
+    return { week: (recent.length / span) * 7, rounds: recent.length };
+  }
+
+  function fieldRows(state) {
+    return (((state.config || {}).meta || {}).entries || []).filter(function (e) {
+      return e.id && e.id !== "other";
+    });
+  }
+
+  /* What is worth practising, and why. Two queues, because they are two
+     different kinds of work: one is meeting a deck for the first time, the
+     other is getting better against one already met. */
+  function targets(state, rounds) {
+    var target = parseFloat((state.config || {}).target) || 0.55;
+    var byOpp = {};
+    rounds.forEach(function (m) {
+      var r = (byOpp[m.opp] = byOpp[m.opp] || { n: 0, w: 0, l: 0, t: 0 });
+      r.n++;
+      if (m.result === "W") r.w++;
+      else if (m.result === "L") r.l++;
+      else r.t++;
+    });
+    var meet = [],
+      fix = [];
+    fieldRows(state).forEach(function (row) {
+      var share = (row.share || 0) / 100;
+      var rec = byOpp[row.id] || { n: 0, w: 0, l: 0, t: 0 };
+      var wr = rec.n ? (rec.w + 0.5 * rec.t) / rec.n : null;
+      if (rec.n < MEET_AT)
+        meet.push({
+          id: row.id, name: row.name, share: share, rec: rec, wr: wr,
+          want: MEET_AT - rec.n,
+          value: share * (1 - rec.n / MEET_AT),
+          kind: "meet",
+        });
+      else if (wr !== null && wr < target)
+        fix.push({
+          id: row.id, name: row.name, share: share, rec: rec, wr: wr,
+          want: Math.max(1, Math.min(ONE_CAP, READ_AT - rec.n)),
+          value: share * (target - wr),
+          kind: "fix",
+        });
+    });
+    var rank = function (a, b) {
+      return b.value - a.value;
+    };
+    meet.sort(rank);
+    fix.sort(rank);
+    return { meet: meet, fix: fix, target: target };
+  }
+
+  function compute(state, opts) {
+    opts = opts || {};
+    var now = midnight(opts.now ? new Date(opts.now) : new Date());
+    var e = planEvent(state);
+    if (!e) return null;
+    var day = asDate(e.date);
+    var left = daysBetween(now, day);
+    var deckId = e.deck || (state.config || {}).active;
+    var deck = ((state.config || {}).decks || []).find(function (d) {
+      return d.id === deckId;
+    });
+    if (!deck) return null;
+
+    var rounds = roundsOf(state, deckId);
+    var p = pace(rounds, now);
+    var weeksLeft = Math.max(0, left / 7);
+    var capacity = Math.max(0, Math.round(p.week * weeksLeft * (1 - RESERVE)));
+    var lock = asDate(e.lockDate) || new Date(day.getTime() - LOCK_DAYS * 86400000);
+
+    var t = targets(state, rounds);
+    var picks = [],
+      spent = 0;
+    var chosen = {};
+    var take = function (list, budget, room) {
+      var used = 0;
+      list.forEach(function (x) {
+        /* The last pass hands leftover capacity back to the first queue, so
+           an archetype already on the list must not be added a second time. */
+        if (chosen[x.id]) return;
+        if (picks.length >= room || used >= budget || spent >= capacity) return;
+        var n = Math.min(x.want, ONE_CAP, budget - used, capacity - spent);
+        if (n <= 0) return;
+        picks.push(Object.assign({}, x, { rounds: n }));
+        chosen[x.id] = 1;
+        used += n;
+        spent += n;
+      });
+    };
+    /* The decks never met get first call, but not the whole plan: being two
+       points under target against a deck played ten times is a different kind
+       of problem, and it deserves room on the page. */
+    var meetRoom = t.fix.length ? Math.max(1, MAX_TARGETS - Math.min(2, t.fix.length)) : MAX_TARGETS;
+    take(t.meet, Math.ceil(capacity * (t.fix.length ? MEET_SHARE : 1)), meetRoom);
+    take(t.fix, capacity - spent, MAX_TARGETS);
+    take(t.meet, capacity - spent, MAX_TARGETS); // whatever is left over
+
+    /* Progress is read off the match log. A plan with boxes to tick by hand
+       goes stale the first time someone forgets; this one cannot. */
+    var since = e.setAt ? midnight(new Date(e.setAt)) : now;
+    var done = rounds.filter(function (m) {
+      var d = asDate(m.date);
+      return d >= since && d <= day;
+    }).length;
+
+    var met = {};
+    rounds.forEach(function (m) {
+      met[m.opp] = 1;
+    });
+    var covered = 0;
+    fieldRows(state).forEach(function (row) {
+      if (met[row.id]) covered += (row.share || 0) / 100;
+    });
+    var added = picks.reduce(function (s, x) {
+      return s + (met[x.id] ? 0 : x.share);
+    }, 0);
+
+    return {
+      event: e,
+      date: day,
+      deck: deck,
+      daysLeft: left,
+      weeksLeft: weeksLeft,
+      pace: p,
+      capacity: capacity,
+      asked: spent,
+      done: done,
+      lock: lock,
+      lockPassed: now > lock,
+      listChangedAfterLock: (deck.versions || []).some(function (v) {
+        return v.createdAt && new Date(v.createdAt) > lock && new Date(v.createdAt) <= day;
+      }),
+      picks: picks,
+      coverage: covered,
+      coverageAfter: covered + added,
+      target: t.target,
+    };
+  }
+
+  var api = { compute: compute, planEvent: planEvent, asDate: asDate, LOCK_DAYS: LOCK_DAYS };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.MatchupPlan = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
 </script>
 <script>/* Matchup Lab — GitHub-backed store for the mobile edition.
@@ -835,15 +1141,264 @@ function pullDecks(quiet){
 }
 $("#loaddecks").onclick = function(){ pullDecks(false); };
 
+/* ---- the deck, read only -------------------------------------------------
+   Everything on this screen comes from the shared database and nothing on it
+   can be changed from the phone. The snapshot is kept here so the screen
+   still answers on a tournament floor with no signal; when it is showing an
+   old copy it says so, with the time it was read. */
+var SNAP = "matchup-lab-phone-snapshot";
+
+function snapshot(){
+  try{ return JSON.parse(localStorage.getItem(SNAP)) || null; }catch(e){ return null; }
+}
+function keepSnapshot(state){
+  try{
+    /* The rounds and the two config branches the screen needs - not the whole
+       database, which does not belong in a browser's storage any longer than
+       it has to. */
+    localStorage.setItem(SNAP, JSON.stringify({
+      at: Date.now(),
+      state: {
+        matches: (state.matches || []).slice(-400),
+        config: {
+          active: (state.config || {}).active,
+          target: (state.config || {}).target,
+          nextEvent: (state.config || {}).nextEvent,
+          decks: ((state.config || {}).decks || []).map(function(d){
+            return { id: d.id, name: d.name, archived: d.archived, archetype: d.archetype,
+                     list: d.list, cardClass: d.cardClass, versions: [],
+                     currentVersion: d.currentVersion };
+          }),
+          meta: { entries: (((state.config || {}).meta) || {}).entries || [],
+                  asOf: (((state.config || {}).meta) || {}).asOf || "" }
+        }
+      }
+    }));
+  }catch(e){ /* a full or private store is not a reason to fail the screen */ }
+}
+
+function fmtWhen(ms){
+  var d = new Date(ms);
+  return d.toLocaleDateString(undefined,{day:"numeric",month:"short"}) + ", " +
+         d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
+}
+function fmtDate(s){
+  var d = MatchupPlan.asDate(s);
+  return d ? d.toLocaleDateString(undefined,{day:"numeric",month:"short"}) : String(s||"");
+}
+
+function deckState(){ var s = snapshot(); return s && s.state ? s.state : null; }
+
+function chosenDeck(){
+  var st = deckState(); if(!st) return null;
+  var want = $("#deckview").value || (st.config||{}).active;
+  var ds = ((st.config||{}).decks || []).filter(function(d){ return d && d.id; });
+  return ds.filter(function(d){ return d.id === want; })[0] || ds[0] || null;
+}
+
+function groupCards(deck){
+  var marks = deck.cardClass || {};
+  var out = { "Pokémon": [], "Trainers": [], "Energy": [], "Not read yet": [] };
+  (deck.list || []).forEach(function(c){
+    var m = marks[c.name] || {};
+    var where = m.super === "pokemon" ? "Pokémon"
+              : m.super === "trainer" ? "Trainers"
+              : m.super === "energy" || m.energy ? "Energy"
+              : "Not read yet";
+    out[where].push(c);
+  });
+  Object.keys(out).forEach(function(k){
+    out[k].sort(function(a,b){ return (b.n||0)-(a.n||0) || String(a.name).localeCompare(String(b.name)); });
+  });
+  return out;
+}
+
+function renderDeckView(){
+  var box = $("#deckBody"); box.innerHTML = "";
+  var snap = snapshot();
+  var st = deckState();
+  if(!st){
+    box.appendChild(el("div","card",
+      "Nothing read yet. Connect the repository on the Send screen, then open this with a signal once."));
+    return;
+  }
+  if(snap && Date.now() - snap.at > 36e5){
+    var warn = el("div","stale","Showing what was read on " + fmtWhen(snap.at) +
+      ". Open this with a signal to refresh it.");
+    box.appendChild(warn);
+  }
+  var deck = chosenDeck();
+  if(!deck){ box.appendChild(el("div","card","No decks in the database yet.")); return; }
+
+  /* --- the plan, if an event is set ------------------------------------- */
+  var plan = null;
+  try{ plan = MatchupPlan.compute(st); }catch(e){ plan = null; }
+  if(plan && plan.daysLeft >= 0){
+    var pc = el("div","card");
+    pc.appendChild(el("h3",null,plan.event.name)).style.cssText="margin:0 0 2px;font-size:16px";
+    pc.appendChild(el("p","note",
+      (plan.daysLeft === 0 ? "Today" : plan.daysLeft + " days away") + " · " +
+      plan.done + " of " + plan.asked + " planned rounds played")).style.marginTop="0";
+    plan.picks.forEach(function(x){
+      var r = el("div","planrow");
+      r.appendChild(el("span","n",String(x.rounds)));
+      var d = el("div");
+      d.appendChild(el("b",null,x.name));
+      d.appendChild(el("span","meta",
+        (100*x.share).toFixed(1) + "% of the field · " +
+        (x.kind === "meet"
+          ? (x.rec.n ? x.rec.n + " rounds so far" : "never played")
+          : x.rec.w + "–" + x.rec.l + "–" + x.rec.t + " so far")));
+      r.appendChild(d);
+      pc.appendChild(r);
+    });
+    box.appendChild(pc);
+  }
+
+  /* --- the last ten rounds ---------------------------------------------- */
+  var mine = (st.matches || []).filter(function(m){
+    return !m.demo && m.myDeck === deck.id;
+  }).sort(function(a,b){ return String(b.date).localeCompare(String(a.date)) || (b.ts||0)-(a.ts||0); })
+   .slice(0,10);
+  var rc = el("div","card");
+  rc.appendChild(el("h3",null,"Last 10 rounds")).style.cssText="margin:0 0 6px;font-size:16px";
+  if(!mine.length){
+    rc.appendChild(el("p","note","No rounds recorded with this deck yet."));
+  } else {
+    var w=0,l=0,t=0;
+    mine.forEach(function(m){ if(m.result==="W")w++; else if(m.result==="L")l++; else t++; });
+    rc.appendChild(el("p","note", w+"–"+l+"–"+t+" across these ten.")).style.marginTop="0";
+    mine.forEach(function(m){
+      var row = el("div","item");
+      var left = el("div");
+      left.appendChild(el("b",null,oppName(m.opp)));
+      left.appendChild(el("div","meta",
+        fmtDate(m.date) + " · " + (m.bo===3?"BO3":"BO1") +
+        (m.note ? " · " + m.note : m.comment ? " · " + m.comment : "")));
+      row.appendChild(left);
+      row.appendChild(el("span","res " + (m.result||""), m.result||"?"));
+      rc.appendChild(row);
+    });
+  }
+  box.appendChild(rc);
+
+  /* --- the sixty cards --------------------------------------------------- */
+  var cc = el("div","card");
+  var total = (deck.list||[]).reduce(function(s,c){ return s + (c.n||0); },0);
+  cc.appendChild(el("h3",null,"The list · " + total + " cards"))
+    .style.cssText="margin:0 0 4px;font-size:16px";
+  if(!total){
+    cc.appendChild(el("p","note","No card list saved for this deck yet."));
+  } else {
+    var g = groupCards(deck);
+    Object.keys(g).forEach(function(k){
+      if(!g[k].length) return;
+      var n = g[k].reduce(function(s,c){ return s + (c.n||0); },0);
+      cc.appendChild(el("div","deck-h", k + " · " + n));
+      g[k].forEach(function(c){
+        var r = el("div","cardrow");
+        r.appendChild(el("span","n",String(c.n)));
+        var nm = el("span",null,c.name);
+        if(c.set) nm.appendChild(el("span","set"," " + c.set + (c.number ? " " + c.number : "")));
+        r.appendChild(nm);
+        cc.appendChild(r);
+      });
+    });
+  }
+  box.appendChild(cc);
+}
+
+function oppName(id){
+  var st = deckState();
+  var e = (((st||{}).config||{}).meta||{}).entries || [];
+  for(var i=0;i<e.length;i++) if(e[i].id === id) return e[i].name;
+  return String(id||"unknown");
+}
+
+function fillDeckPicker(){
+  var st = deckState(), sel = $("#deckview");
+  var ds = ((st||{}).config||{}).decks || [];
+  ds = ds.filter(function(d){ return d && d.id && !d.archived; });
+  var keep = sel.value;
+  sel.innerHTML = "";
+  ds.forEach(function(d){
+    var o = document.createElement("option");
+    o.value = d.id; o.textContent = d.name || d.id;
+    sel.appendChild(o);
+  });
+  sel.value = keep && ds.some(function(d){ return d.id===keep; })
+    ? keep : ((st||{}).config||{}).active || (ds[0]||{}).id || "";
+  sel.disabled = ds.length < 2;
+}
+
+/* Network first, cache second: the newest database when there is a signal,
+   the last one read when there is not. */
+function refreshDeckView(){
+  var c = cfg(), msg = $("#deckMsg");
+  renderDeckView();
+  fillDeckPicker();
+  if(!c.repo || !c.token){
+    msg.textContent = "Connect the repository on the Send screen to read your deck here.";
+    msg.className = "note";
+    return;
+  }
+  msg.textContent = "Reading…"; msg.className = "note";
+  var transport = function(method, url, body){
+    return fetch(url, { method: method,
+      headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
+                 "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){ return r.text().then(function(t){
+      var j=null; try{ j=JSON.parse(t); }catch(e){}
+      return { status: r.status, json: j }; }); });
+  };
+  var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
+                                      branch: c.branch || "main" }, transport);
+  store.pull().then(function(remote){
+    if(!remote){ msg.textContent = "No " + (c.path||"data.json") + " in " + c.repo + " yet."; msg.className="note bad"; return; }
+    keepSnapshot(remote);
+    fillDeckPicker();
+    renderDeckView();
+    msg.textContent = "Read just now.";
+    msg.className = "note ok";
+  }).catch(function(e){
+    var snap = snapshot();
+    msg.textContent = snap
+      ? "No connection — showing what was read on " + fmtWhen(snap.at) + "."
+      : "Could not read the database: " + (e && e.message ? e.message : e);
+    msg.className = "note " + (snap ? "" : "bad");
+  });
+}
+
+$("#deckview").onchange = renderDeckView;
+
+$("#tabdeck").onclick = function(){
+  var deckOn = $("#screen-deck").classList.contains("hidden");
+  $("#screen-deck").classList.toggle("hidden", !deckOn);
+  $("#screen-log").classList.toggle("hidden", deckOn);
+  $("#screen-sync").classList.add("hidden");
+  $("#save").style.display = deckOn ? "none" : "";
+  $("#tabsync").style.display = deckOn ? "none" : "";
+  this.textContent = deckOn ? "Back" : "Deck";
+  if(deckOn) refreshDeckView();
+  window.scrollTo(0,0);
+};
+
+
 $("#forget").onclick = function(){
   var c = cfg();
   if(!c.repo && !c.token){ alert("No repository or token is saved on this phone."); return; }
   if(!confirm("Remove the saved repository and token from this phone?\n\nRecorded rounds are kept. " +
+    "The copy of your database kept for the Deck screen goes too. " +
     "Revoke the token on GitHub as well if the phone may be out of your hands.")) return;
   try{ localStorage.removeItem(CFG); }catch(e){}
+  /* The deck view's copy of the database goes with the token: whoever can no
+     longer reach the repository should not still be holding a read of it. */
+  try{ localStorage.removeItem(SNAP); }catch(e){}
   $("#repo").value = ""; $("#token").value = "";
   renderSyncState();
-  $("#syncMsg").textContent = "Repository and token removed from this phone.";
+  if($("#deckBody")) renderDeckView();
+  $("#syncMsg").textContent = "Repository, token and the saved copy of the database removed from this phone.";
 };
 
 fillSelects(); fillDecks(); renderGames(); refresh();

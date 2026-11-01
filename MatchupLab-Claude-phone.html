@@ -1,0 +1,2135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#141229">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Round Logger">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<title>Matchup Lab — Round Logger</title>
+<style>
+:root{
+  --bg:#12101f; --card:#1b1930; --line:#2d2a47; --ink:#f2f1f8; --muted:#a3a0c0;
+  --accent:#7c5cfc; --win:#22c07a; --loss:#f05a63; --tie:#e0a33a;
+  --tap:52px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+body{padding:max(12px,env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
+h1{font-size:19px;margin:4px 0 2px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+label.lbl{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
+select,input,textarea,button{font:inherit;color:var(--ink)}
+select,input,textarea{width:100%;background:#15132a;border:1px solid var(--line);
+  border-radius:11px;padding:13px 12px;min-height:var(--tap)}
+textarea{min-height:66px;resize:vertical}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.seg button, .pick button{min-height:var(--tap);border-radius:11px;border:1px solid var(--line);
+  background:#15132a;font-weight:600}
+.seg button[aria-pressed="true"][data-r="W"]{background:var(--win);border-color:var(--win);color:#06250f}
+.seg button[aria-pressed="true"][data-r="L"]{background:var(--loss);border-color:var(--loss);color:#2c0409}
+.seg button[aria-pressed="true"][data-r="T"]{background:var(--tie);border-color:var(--tie);color:#2b1d02}
+.pick{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pick button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.game{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.game h3{font-size:14px;margin:0 0 8px;color:var(--muted);font-weight:600}
+.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(18,16,31,.96);
+  border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  display:flex;gap:8px;backdrop-filter:blur(8px)}
+.bar button{flex:1;min-height:var(--tap);border-radius:12px;border:0;font-weight:700;font-size:16px}
+#save{background:var(--accent);color:#fff}
+#tabsync,#tabdeck{background:#15132a;color:var(--ink);border:1px solid var(--line);
+  flex:0 0 auto;padding:0 14px;font-size:15px}
+.calm-btn,.danger-btn{margin-top:10px;min-height:var(--tap);width:100%;border-radius:12px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-weight:600;font-size:15px}
+.calm-btn{color:var(--ink)}
+.warn-note{color:var(--tie)}
+.lbl-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.inline-btn{min-height:32px;padding:0 12px;border-radius:9px;border:1px solid var(--line);
+  background:#15132a;color:var(--ink);font-weight:600;font-size:13px}
+.item{cursor:pointer}
+.row-right{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.del{min-width:var(--tap);min-height:var(--tap);border-radius:10px;border:1px solid var(--line);background:#15132a;color:var(--loss);font-size:17px;line-height:1;padding:0}
+.del:active{background:#2a1520}
+.item:active{background:#1b1930}
+.list{margin-top:4px}
+.item{display:flex;justify-content:space-between;gap:10px;align-items:center;
+  padding:11px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item b{font-weight:600}
+.item .meta{color:var(--muted);font-size:12.5px}
+.res{font-weight:800;min-width:26px;text-align:right}
+.res.W{color:var(--win)} .res.L{color:var(--loss)} .res.T{color:var(--tie)}
+.note{color:var(--muted);font-size:12.5px;margin-top:8px}
+.warn{background:#2a1c10;border-color:#6b4a1e;color:#f0d2a6}
+.ok{color:var(--win)} .bad{color:var(--loss)}
+.hidden{display:none}
+.deck-h{font-size:14px;margin:16px 0 6px;color:var(--muted);font-weight:600;
+  text-transform:uppercase;letter-spacing:.06em}
+.deck-h:first-child{margin-top:0}
+.cardrow{display:flex;gap:10px;align-items:baseline;padding:8px 0;
+  border-bottom:1px solid var(--line);font-size:15px}
+.cardrow:last-child{border-bottom:0}
+.cardrow .n{flex:0 0 26px;text-align:right;font-weight:700;color:var(--accent)}
+.cardrow .set{color:var(--muted);font-size:12px}
+.planrow{display:flex;gap:12px;align-items:flex-start;padding:10px 0;
+  border-bottom:1px solid var(--line)}
+.planrow:last-child{border-bottom:0}
+.planrow .n{flex:0 0 26px;text-align:right;font-weight:800;font-size:18px;color:var(--accent)}
+.planrow b{display:block;font-size:15px}
+.stale{background:#2a1c10;border:1px solid #6b4a1e;color:#f0d2a6;
+  border-radius:11px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+.readonly{color:var(--muted);font-size:12.5px;text-align:center;margin:14px 0 0}
+.totals{display:flex;flex-wrap:wrap;gap:0 18px}
+.totals div{min-width:62px;padding:6px 0}
+.totals b{display:block;font-size:21px;line-height:1.15}
+.totals span{font-size:11.5px;color:var(--muted)}
+.headline{display:flex;gap:14px;align-items:center}
+.headline .idx{font-size:40px;font-weight:800;line-height:1}
+.headline .word{font-size:16px;font-weight:700;display:block}
+.headline .of{font-size:12px;color:var(--muted)}
+.chk{display:flex;justify-content:space-between;gap:10px;align-items:baseline;
+  padding:9px 0;border-bottom:1px solid var(--line)}
+.chk:last-child{border-bottom:0}
+.chk .lab{font-size:13px;color:var(--muted)}
+.chk .val{font-weight:700;font-size:15px}
+.good-t{color:var(--win)} .warn-t{color:var(--tie)} .bad-t{color:var(--loss)}
+.count{background:var(--accent);border-radius:999px;padding:1px 8px;font-size:12px;margin-left:6px}
+details summary{min-height:var(--tap);display:flex;align-items:center;cursor:pointer;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<h1>Round Logger</h1>
+<p class="sub" id="sub">Records rounds while you play. Nothing leaves the phone until you send it.</p>
+
+<div id="screen-log">
+  <div class="card">
+    <div class="lbl-row"><label class="lbl" for="mydeck">My deck</label>
+      <button type="button" id="newdeck" class="inline-btn">+ New deck</button></div>
+    <select id="mydeck"></select>
+    <p class="note" id="deckNote"></p>
+    <div id="versionWrap" hidden>
+      <label class="lbl" for="version" style="margin-top:12px;display:block">List version</label>
+      <select id="version"></select>
+      <p class="note" id="versionNote"></p>
+    </div>
+    <label class="lbl" for="opp" style="margin-top:12px;display:block">Opponent deck</label>
+    <select id="opp"></select>
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label class="lbl" for="event">Where</label>
+        <select id="event"></select>
+      </div>
+      <div>
+        <label class="lbl" for="bo">Format</label>
+        <select id="bo"><option value="3">Best of three</option><option value="1">Single game</option></select>
+      </div>
+    </div>
+  </div>
+  <div class="card" id="games"></div>
+  <div class="card">
+    <label class="lbl" for="comment">What happened in this round</label>
+    <textarea id="comment" maxlength="300" placeholder="Optional. How it went — worth a line after a win too."></textarea>
+    <label class="lbl" for="note" style="margin-top:12px;display:block">Main takeaway for next time</label>
+    <textarea id="note" maxlength="300" placeholder="Optional. What will I do differently?"></textarea>
+  </div>
+</div>
+
+<div id="screen-sync" class="hidden">
+  <div class="card" id="syncState"></div>
+  <div class="card">
+    <h3 style="margin:0 0 10px;font-size:15px">Send rounds to your database</h3>
+    <label class="lbl" for="repo">Private repository (owner/name)</label>
+    <input id="repo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="your-account/matchup-lab-data">
+    <label class="lbl" for="token" style="margin-top:12px">Fine-grained token · Contents: read and write</label>
+    <input id="token" type="password" autocomplete="off" placeholder="github_pat_…">
+    <button id="connect" style="margin-top:14px;min-height:var(--tap);width:100%;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:700">Save and send now</button>
+    <button id="loaddecks" class="calm-btn">Load my decks from the database</button>
+    <p class="note" id="syncMsg"></p>
+    <p class="note"><b>Worth knowing.</b> On this page the token has to live in the phone's browser storage, which is weaker than the desktop app, where it never reaches the page at all. The Deck screen also keeps a copy of your decks and recent rounds there, so it still works without a signal. Use a token limited to this one repository, revoke it on GitHub if the phone is lost, and use <b>Forget repository and token</b> below to clear both.</p>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px;font-size:15px">Or move a file by hand</h3>
+    <p class="note" style="margin-top:0">No token, nothing on the network. Send the file to yourself, then use <b>Import a backup</b> in the desktop app.</p>
+    <button id="share" style="margin-top:8px;min-height:var(--tap);width:100%;border-radius:12px;border:1px solid var(--line);background:#15132a;color:var(--ink);font-weight:600">Share the rounds file</button>
+    <p class="note" id="shareMsg"></p>
+  </div>
+  <div class="card">
+    <details><summary>Rounds held on this phone (<span id="held">0</span>)</summary>
+      <div class="list" id="list"></div>
+      <p class="note" id="tapHint">Tap ✕ on a round to delete just that one.</p>
+      <button id="wipe" class="calm-btn">Clear rounds already sent</button>
+      <button id="wipeAll" class="danger-btn">Clear every round</button>
+      <button id="forget" class="danger-btn">Forget repository and token</button>
+      <p class="note">Use the last one before lending the phone to anyone, or if you stop using sync. It removes the saved token from this phone; it does not revoke it on GitHub.</p>
+    </details>
+  </div>
+  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-11-01 v2.21.0</p>
+</div>
+
+<div id="screen-deck" class="hidden">
+  <div class="card">
+    <label class="lbl" for="deckview">Deck</label>
+    <select id="deckview"></select>
+    <p class="note" id="deckMsg"></p>
+  </div>
+  <div id="deckBody"></div>
+  <p class="readonly">This screen only reads. Nothing here can be changed from the phone.</p>
+</div>
+
+<div class="bar">
+  <button id="save">Save round</button>
+  <button id="tabsync">Send<span class="count" id="badge">0</span></button>
+  <button id="tabdeck">Deck</button>
+</div>
+
+<script>/* Matchup Lab — shared merge logic. Source of the copy inlined in the phone
+ * logger and used by the Mac app; edit it here, never in the built page.
+ *
+ * A port of merge_states / merge_configs / tombstones_for in storage.py. Both
+ * run against the same file, so any disagreement silently corrupts the
+ * database - and one did: this side read a deletion only under a bare id
+ * while the computer writes "<kind>:<id>", so a round deleted on the computer
+ * came back the next time a phone published. tests/merge_cases.json is the
+ * contract, run against both implementations before every release.
+ *
+ * Map, not a plain object: object keys that look like integers get reordered,
+ * which would change entry order before the (stable) sort.
+ */
+(function (root) {
+  "use strict";
+
+  function byId(items) {
+    var out = new Map();
+    var list = items || [];
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      if (it === null || typeof it !== "object" || Array.isArray(it)) continue;
+      var raw = it.id;
+      out.set(String(raw ? raw : "_" + i), it);
+    }
+    return out;
+  }
+
+  function num(v) { return v ? v : 0; }
+
+  /* The starter deck the app makes on first run, with nothing put in it yet.
+     Mirrors untouched_deck() in storage.py and must stay in step with it. */
+  var STARTER_NAMES = ["My first deck"];
+  function untouchedDeck(d) {
+    if (!d || typeof d !== "object") return false;
+    if (STARTER_NAMES.indexOf(String(d.name || "").trim()) < 0) return false;
+    return !(d.list || (d.versions && d.versions.length) || d.cardClass);
+  }
+
+  /* A deletion is stamped "<kind>:<id>" by the computer and, in older
+     databases, as a bare id. Both forms count, and the stamp is a moment in
+     time: an entry saved after it was deleted is a new entry and comes back. */
+  function tombstoneAt(tombs, kind, id) {
+    var a = Object.prototype.hasOwnProperty.call(tombs, kind + ":" + id) ? num(tombs[kind + ":" + id]) : -1;
+    var b = Object.prototype.hasOwnProperty.call(tombs, id) ? num(tombs[id]) : -1;
+    return a > b ? a : b;
+  }
+
+  function groups(state) {
+    state = state || {};
+    return {
+      matches: state.matches || [],
+      drills: state.drills || [],
+      trash: state.trash || [],
+      decks: ((state.config || {}).decks) || []
+    };
+  }
+
+  function mergeStates(a, b) {
+    a = a || {}; b = b || {};
+    var tombs = Object.assign({}, a._tombstones || {});
+    var bt = b._tombstones || {};
+    Object.keys(bt).forEach(function (k) {
+      if (num(bt[k]) > num(tombs[k])) tombs[k] = bt[k];
+    });
+
+    /* Winner per entry, by the entry's own timestamp - not by which side's
+       database was written last. A phone saved at noon still must not push
+       its morning copy of a list over an edit made at eleven. */
+    function union(kind) {
+      var picked = new Map();
+      [a, b].forEach(function (state) {
+        byId(groups(state)[kind]).forEach(function (item, id) {
+          var held = picked.get(id);
+          if (held === undefined) { picked.set(id, item); return; }
+          if (kind === "decks" && untouchedDeck(held) !== untouchedDeck(item)) {
+            // an empty starter never wins against a real deck, whatever the clock says
+            picked.set(id, untouchedDeck(held) ? item : held);
+            return;
+          }
+          picked.set(id, num(item._modifiedAt) > num(held._modifiedAt) ? item : held);
+        });
+      });
+      var out = [];
+      picked.forEach(function (v, id) {
+        if (num(v._modifiedAt) > tombstoneAt(tombs, kind, id)) out.push(v);
+      });
+      out.sort(function (x, y) {
+        return (num(x.ts) - num(y.ts)) || String(x.id).localeCompare(String(y.id));
+      });
+      return out;
+    }
+
+    var matches = union("matches");
+    var drills = union("drills");
+    var trash = union("trash");
+    var decks = union("decks");
+
+    var out = {
+      schemaVersion: 2,
+      config: mergeConfigs(a.config, b.config, matches, drills, trash, decks,
+                           num(a._updatedAt) >= num(b._updatedAt) ? a.config : b.config),
+      matches: matches,
+      drills: drills,
+      trash: trash,
+      _updatedAt: Math.max(num(a._updatedAt), num(b._updatedAt)),
+      _configUpdatedAt: Math.max(num(a._configUpdatedAt) || num(a._updatedAt),
+                                 num(b._configUpdatedAt) || num(b._updatedAt)),
+      _tombstones: tombs
+    };
+
+    /* Conflicts, and the record of which were settled, belong to the computer:
+       telling a real divergence from a sequential edit needs a hash of the card
+       list, which this cannot do in a browser. So it never invents one - but it
+       carries through every conflict it was handed, because publishing from a
+       phone must not quietly erase that history. */
+    var conflicts = new Map();
+    [a, b].forEach(function (s) {
+      (s._conflicts || []).forEach(function (c) {
+        if (c && typeof c === "object" && c.id) conflicts.set(c.id, c);
+      });
+    });
+    if (conflicts.size) out._conflicts = Array.from(conflicts.values())
+      .sort(function (x, y) { return String(x.id).localeCompare(String(y.id)); });
+    var settled = {};
+    [a, b].forEach(function (s) { (s._resolvedConflicts || []).forEach(function (id) { settled[id] = 1; }); });
+    var settledIds = Object.keys(settled).sort();
+    if (settledIds.length) out._resolvedConflicts = settledIds;
+    return out;
+  }
+
+  function isEmpty(o) { return !o || Object.keys(o).length === 0; }
+
+  function mergeConfigs(ca, cb, matches, drills, trash, decks, newest) {
+    var merged = Object.assign({}, isEmpty(newest) ? (isEmpty(ca) ? cb : ca) : newest);
+
+    /* Which decks something was actually recorded against. A round names the
+       player's own deck in myDeck; only a drill calls the field deck. The
+       trash counts too - a deleted round can be restored. */
+    var used = new Map();
+    function note(k) { if (k) used.set(k, (used.get(k) || 0) + 1); }
+    (matches || []).forEach(function (m) { note(m && m.myDeck); });
+    (drills || []).forEach(function (d) { note(d && d.deck); });
+    (trash || []).forEach(function (t) {
+      if (t && t.kind === "match" && t.item) note(t.item.myDeck);
+    });
+
+    /* A starter or sample deck beside real ones is a leftover from a computer
+       that was set up and then pointed at an existing database. It goes,
+       unless something was recorded against it. */
+    var kept = (decks || []).filter(function (d) {
+      if (!d || !d.id) return false;
+      if (used.get(d.id)) return true;
+      return !(untouchedDeck(d) || d.demoList);
+    });
+    merged.decks = (kept.length && (decks || []).length > 1) ? kept : (decks || []);
+
+    var have = {};
+    merged.decks.forEach(function (d) { have[d.id] = 1; });
+    if (!have[merged.active]) {
+      var best = null, bestN = -Infinity;
+      used.forEach(function (n, k) { if (have[k] && n > bestN) { bestN = n; best = k; } });
+      merged.active = best || (merged.decks.length ? merged.decks[0].id : null);
+    }
+    return merged;
+  }
+
+  function tombstonesFor(previous, incoming, nowMs) {
+    var now = nowMs === undefined ? Date.now() : nowMs;
+    var tombs = Object.assign({}, (previous || {})._tombstones || {});
+    ["matches", "drills"].forEach(function (key) {
+      var prev = byId(groups(previous)[key]);
+      var inc = byId(groups(incoming)[key]);
+      // the same "<kind>:<id>" the computer writes, so either side can read it
+      prev.forEach(function (_v, id) { if (!inc.has(id)) tombs[key + ":" + id] = now; });
+      inc.forEach(function (_v, id) { delete tombs[key + ":" + id]; delete tombs[id]; });
+    });
+    return tombs;
+  }
+
+  var api = { mergeStates: mergeStates, mergeConfigs: mergeConfigs, tombstonesFor: tombstonesFor };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.MatchupMerge = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+<script>/* Matchup Lab — what to practise before a named event.
+ *
+ * The arithmetic only. It is kept apart from the screen that draws it
+ * because two surfaces need the answer: the app, and the read-only deck view
+ * in the phone logger, which this file is inlined into at build time. The
+ * merge logic taught us what happens when one rule gets written twice in two
+ * languages - a round deleted on the computer came back from the phone - so
+ * there is one copy of this, and tests/plan_rules.js runs against it.
+ *
+ *   MatchupPlan.compute(state, { now })  ->  the plan, or null
+ *
+ * `state` is the database as it sits in data.json: config.decks,
+ * config.meta.entries, config.nextEvent, config.target and matches.
+ */
+(function (root) {
+  "use strict";
+
+  var MEET_AT = 3; // rounds that turn "never played" into a first impression
+  var READ_AT = 10; // rounds that turn a first impression into something to act on
+  var ONE_CAP = 4; // never ask for more than this against one archetype
+  var RESERVE = 0.2; // part of the capacity left free for whatever comes up
+  var LOCK_DAYS = 5; // the list stops changing this many days out
+  /* Two limits that keep the plan a plan. Without the first, the queue of
+     decks never met swallows the whole capacity and the matchups actually
+     being lost never appear; without the second, a wide field turns the page
+     into a list of twenty archetypes nobody is going to work through. */
+  var MEET_SHARE = 0.6;
+  var MAX_TARGETS = 5;
+
+  function midnight(d) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function asDate(s) {
+    var p = String(s || "").split("-");
+    if (p.length !== 3) return null;
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function daysBetween(a, b) {
+    return Math.round((b - a) / 86400000);
+  }
+
+  function planEvent(state) {
+    var e = state && state.config && state.config.nextEvent;
+    if (!e || !e.name || !asDate(e.date)) return null;
+    return e;
+  }
+
+  function roundsOf(state, deckId) {
+    return (state.matches || []).filter(function (m) {
+      return !m.demo && m.myDeck === deckId && asDate(m.date);
+    });
+  }
+
+  /* How many rounds actually get recorded in a week. Measured, not asked
+     for: a plan built on wishes is a list of things that will not happen. */
+  function pace(rounds, now) {
+    if (!rounds.length) return { week: 0, rounds: 0 };
+    var days = rounds.map(function (m) {
+      return asDate(m.date).getTime();
+    });
+    var last = Math.max.apply(null, days),
+      first = Math.min.apply(null, days);
+    /* Only the last six weeks count, and the window runs to today rather
+       than to the last round: a deck left alone for a month is not still
+       being played seven times a week. */
+    var end = Math.max(last, now.getTime());
+    var since = Math.max(first, end - 42 * 86400000);
+    var recent = days.filter(function (t) {
+      return t >= since;
+    });
+    var span = Math.max(7, daysBetween(new Date(since), new Date(end)) + 1);
+    return { week: (recent.length / span) * 7, rounds: recent.length };
+  }
+
+  /* Archetypes the player has told the app to count as one. The computer
+     keeps the map; this file only reads it, so the phone and the app plan
+     against the same field. */
+  function familyOf(state, id) {
+    var map = (state.config || {}).families || {};
+    var at = id;
+    for (var i = 0; i < 8 && map[at] && map[at] !== at; i++) at = map[at];
+    return at;
+  }
+
+  function fieldRows(state) {
+    var all = (((state.config || {}).meta || {}).entries || []).filter(function (e) {
+      return e.id && e.id !== "other";
+    });
+    /* A parent stands for its children and carries their share with it. */
+    return all.filter(function (e) {
+      return familyOf(state, e.id) === e.id;
+    }).map(function (e) {
+      var share = all.reduce(function (s, x) {
+        return s + (familyOf(state, x.id) === e.id ? x.share || 0 : 0);
+      }, 0);
+      return Object.assign({}, e, { share: share });
+    });
+  }
+
+  /* What is worth practising, and why. Two queues, because they are two
+     different kinds of work: one is meeting a deck for the first time, the
+     other is getting better against one already met. */
+  function targets(state, rounds) {
+    var target = parseFloat((state.config || {}).target) || 0.55;
+    var byOpp = {};
+    rounds.forEach(function (m) {
+      var opp = familyOf(state, m.opp);
+      var r = (byOpp[opp] = byOpp[opp] || { n: 0, w: 0, l: 0, t: 0 });
+      r.n++;
+      if (m.result === "W") r.w++;
+      else if (m.result === "L") r.l++;
+      else r.t++;
+    });
+    var meet = [],
+      fix = [];
+    fieldRows(state).forEach(function (row) {
+      var share = (row.share || 0) / 100;
+      var rec = byOpp[row.id] || { n: 0, w: 0, l: 0, t: 0 };
+      var wr = rec.n ? (rec.w + 0.5 * rec.t) / rec.n : null;
+      if (rec.n < MEET_AT)
+        meet.push({
+          id: row.id, name: row.name, share: share, rec: rec, wr: wr,
+          want: MEET_AT - rec.n,
+          value: share * (1 - rec.n / MEET_AT),
+          kind: "meet",
+        });
+      else if (wr !== null && wr < target)
+        fix.push({
+          id: row.id, name: row.name, share: share, rec: rec, wr: wr,
+          want: Math.max(1, Math.min(ONE_CAP, READ_AT - rec.n)),
+          value: share * (target - wr),
+          kind: "fix",
+        });
+    });
+    var rank = function (a, b) {
+      return b.value - a.value;
+    };
+    meet.sort(rank);
+    fix.sort(rank);
+    return { meet: meet, fix: fix, target: target };
+  }
+
+  function compute(state, opts) {
+    opts = opts || {};
+    var now = midnight(opts.now ? new Date(opts.now) : new Date());
+    var e = planEvent(state);
+    if (!e) return null;
+    var day = asDate(e.date);
+    var left = daysBetween(now, day);
+    var deckId = e.deck || (state.config || {}).active;
+    var deck = ((state.config || {}).decks || []).find(function (d) {
+      return d.id === deckId;
+    });
+    if (!deck) return null;
+
+    var rounds = roundsOf(state, deckId);
+    var p = pace(rounds, now);
+    var weeksLeft = Math.max(0, left / 7);
+    var capacity = Math.max(0, Math.round(p.week * weeksLeft * (1 - RESERVE)));
+    var lock = asDate(e.lockDate) || new Date(day.getTime() - LOCK_DAYS * 86400000);
+
+    var t = targets(state, rounds);
+    var picks = [],
+      spent = 0;
+    var chosen = {};
+    var take = function (list, budget, room) {
+      var used = 0;
+      list.forEach(function (x) {
+        /* The last pass hands leftover capacity back to the first queue, so
+           an archetype already on the list must not be added a second time. */
+        if (chosen[x.id]) return;
+        if (picks.length >= room || used >= budget || spent >= capacity) return;
+        var n = Math.min(x.want, ONE_CAP, budget - used, capacity - spent);
+        if (n <= 0) return;
+        picks.push(Object.assign({}, x, { rounds: n }));
+        chosen[x.id] = 1;
+        used += n;
+        spent += n;
+      });
+    };
+    /* The decks never met get first call, but not the whole plan: being two
+       points under target against a deck played ten times is a different kind
+       of problem, and it deserves room on the page. */
+    var meetRoom = t.fix.length ? Math.max(1, MAX_TARGETS - Math.min(2, t.fix.length)) : MAX_TARGETS;
+    take(t.meet, Math.ceil(capacity * (t.fix.length ? MEET_SHARE : 1)), meetRoom);
+    take(t.fix, capacity - spent, MAX_TARGETS);
+    take(t.meet, capacity - spent, MAX_TARGETS); // whatever is left over
+
+    /* Progress is read off the match log. A plan with boxes to tick by hand
+       goes stale the first time someone forgets; this one cannot. */
+    var since = e.setAt ? midnight(new Date(e.setAt)) : now;
+    var done = rounds.filter(function (m) {
+      var d = asDate(m.date);
+      return d >= since && d <= day;
+    }).length;
+
+    var met = {};
+    rounds.forEach(function (m) {
+      met[familyOf(state, m.opp)] = 1;
+    });
+    var covered = 0;
+    fieldRows(state).forEach(function (row) {
+      if (met[row.id]) covered += (row.share || 0) / 100;
+    });
+    var added = picks.reduce(function (s, x) {
+      return s + (met[x.id] ? 0 : x.share);
+    }, 0);
+
+    return {
+      event: e,
+      date: day,
+      deck: deck,
+      daysLeft: left,
+      weeksLeft: weeksLeft,
+      pace: p,
+      capacity: capacity,
+      asked: spent,
+      done: done,
+      lock: lock,
+      lockPassed: now > lock,
+      listChangedAfterLock: (deck.versions || []).some(function (v) {
+        return v.createdAt && new Date(v.createdAt) > lock && new Date(v.createdAt) <= day;
+      }),
+      picks: picks,
+      coverage: covered,
+      coverageAfter: covered + added,
+      target: t.target,
+    };
+  }
+
+  var api = { compute: compute, planEvent: planEvent, asDate: asDate, LOCK_DAYS: LOCK_DAYS,
+              familyOf: familyOf };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.MatchupPlan = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+<script>/* Matchup Lab — what a deck is, in numbers.
+ *
+ * The card maths and the reading of recorded games, with no screen attached.
+ * Two surfaces need these answers: the Consistency page in the app, and the
+ * read-only deck view in the phone logger, which this file is inlined into
+ * at build time. One copy, so the two can never quietly disagree - the same
+ * reason plan-core.js and merge.js live apart from the pages that draw them.
+ *
+ *   MatchupDeck.summary(state, deckId)  ->  the headline and the three checks
+ *
+ * Everything else is exported too, because the Consistency page builds the
+ * rest of its screen from the same pieces.
+ */
+(function (root) {
+  "use strict";
+
+  var DECK = 60;
+  var PRIOR_GAMES = 15;          // how much play it takes to outweigh the list
+  var POOLED_TURN_GAP = 0.11;    // the format's own advantage for going first
+  var ENOUGH = 25;               // below this, the index is provisional
+  var FIELD_SIZE = 15;           // how much of the metagame to measure
+
+  var ENGINE_FAULT = { start: 1, draw: 1, donk: 1, deck: 1, brick: 1 };
+
+  /* "Engine" here is both halves of it: cards that FIND what you need and
+     cards that REFILL the hand. A deck full of Ultra Balls and no supporter
+     digs itself empty by turn three; a deck of draw supporters and no search
+     draws cards it cannot use. The two are marked apart for that reason, and
+     the maths asks for two engine cards of either kind. */
+  var SEARCH_GUESS = /^(ultra|nest|quick|buddy-buddy|great|level) ball|^earthen vessel|^arven$|^energy (search|retrieval)/i;
+  var DRAW_GUESS = /^professor'?s research|^iono$|^colress'?s experiment|^pok[eé]gear|^trekking shoes|^bills? transfer|^judge$|^cynthia/i;
+
+  // ---- combinatorics ----------------------------------------------------
+  function comb(n, k) {
+    if (k < 0 || k > n) return 0;
+    k = Math.min(k, n - k);
+    var out = 1;
+    for (var i = 1; i <= k; i++) out = (out * (n - k + i)) / i;
+    return out;
+  }
+
+  /* P(the first `drawn` cards hold at least need[i] of each class).
+     Exact: walks every split of the draw across the disjoint classes. */
+  function pMeets(counts, drawn, need) {
+    var total = comb(DECK, drawn);
+    if (!total) return 0;
+    function walk(i, left) {
+      if (i === counts.length) return left === 0 ? 1 : 0;
+      var out = 0;
+      var top = Math.min(counts[i], left);
+      for (var k = need[i] || 0; k <= top; k++) out += comb(counts[i], k) * walk(i + 1, left - k);
+      return out;
+    }
+    return walk(0, drawn) / total;
+  }
+
+  /* L — the chance the deck simply functions by the end of your second turn,
+     given a keepable hand. Eight cards seen on the play, nine on the draw. */
+  function listConsistency(basic, engine, energy) {
+    var rest = DECK - basic - engine - energy;
+    if (rest < 0 || basic <= 0) return null;
+    var counts = [basic, engine, energy, rest];
+    var out = [];
+    [8, 9].forEach(function (d) {
+      var keep = pMeets(counts, d, [1, 0, 0, 0]);
+      out.push(keep ? pMeets(counts, d, [1, 2, 1, 0]) / keep : 0);
+    });
+    return (out[0] + out[1]) / 2;
+  }
+
+  /* The stricter question: a Basic, something to FIND with, something to
+     DRAW with, and an energy. This is the hand a player actually wants. */
+  function completeStart(basic, search, draw, energy) {
+    var rest = DECK - basic - search - draw - energy;
+    if (rest < 0 || basic <= 0 || !search || !draw) return null;
+    var counts = [basic, search, draw, energy, rest];
+    var out = [];
+    [8, 9].forEach(function (d) {
+      var keep = pMeets(counts, d, [1, 0, 0, 0, 0]);
+      out.push(keep ? pMeets(counts, d, [1, 1, 1, 1, 0]) / keep : 0);
+    });
+    return (out[0] + out[1]) / 2;
+  }
+
+  function mulligan(basics) {
+    var p = comb(DECK - basics, 7) / comb(DECK, 7);
+    return { p: p, given: p / (1 - p) };
+  }
+
+  function atLeastOne(copies, drawn) {
+    return 1 - comb(DECK - copies, drawn) / comb(DECK, drawn);
+  }
+
+  // ---- what actually happened -------------------------------------------
+  function gamesOf(matches) {
+    var out = [];
+    matches.forEach(function (m) {
+      (m.games || []).forEach(function (g) {
+        out.push({ r: g.r, reason: g.reason || "", first: g.first, opp: m.opp, match: m.id,
+                   /* what was written about this game or the round it sat in,
+                      so a loss explained in words is not called unexplained */
+                   note: g.note || "", comment: (m.comment || "") + " " + (m.note || "") });
+      });
+    });
+    return out;
+  }
+  function engineReliability(games, L) {
+    var losses = games.filter(function (g) { return g.r === "L"; });
+    var named = losses.filter(function (g) { return g.reason; });
+    var faults = named.filter(function (g) { return ENGINE_FAULT[g.reason]; }).length;
+    /* Losses with no reason written down are split the way the named ones
+       were, rather than counted as blameless. Coverage is shown, because
+       that assumption is only as good as the habit of filling them in. */
+    var share = named.length ? faults / named.length : 1 - L;
+    var b = faults + (losses.length - named.length) * share;
+    var p = (b + PRIOR_GAMES * (1 - L)) / (games.length + PRIOR_GAMES);
+    return {
+      c1: 1 - p,
+      bricks: b,
+      faults: faults,
+      losses: losses.length,
+      coverage: losses.length ? named.length / losses.length : 1,
+    };
+  }
+
+  /* C2 — even across the field, or feast and famine? Pearson dispersion
+     against a single true rate, pulled towards 1 while the sample is thin. */
+  function spread(games) {
+    var by = {};
+    games.forEach(function (g) { (by[g.opp] = by[g.opp] || []).push(g.r === "W" ? 1 : 0); });
+    var groups = Object.keys(by).map(function (k) { return by[k]; })
+      .filter(function (v) { return v.length >= 2; });
+    if (groups.length < 3) return null;
+    var wins = 0, n = 0;
+    groups.forEach(function (v) { v.forEach(function (x) { wins += x; n++; }); });
+    var p = wins / n;
+    if (p <= 0 || p >= 1) return 1;
+    var chi = 0;
+    groups.forEach(function (v) {
+      var k = v.reduce(function (a, b) { return a + b; }, 0);
+      chi += Math.pow(k - v.length * p, 2) / (v.length * p * (1 - p));
+    });
+    var phi = (chi + 4) / (groups.length - 1 + 4);
+    return Math.max(0.3, 1 / Math.sqrt(Math.max(1, phi)));
+  }
+
+  /* C3 — how much the deck leans on winning the flip, measured against the
+     advantage the format gives everybody rather than against zero. */
+  function turnOrder(games) {
+    var f = games.filter(function (g) { return g.first === true; });
+    var s = games.filter(function (g) { return g.first === false; });
+    if (f.length < 3 || s.length < 3) return null;
+    var wr = function (a) {
+      return a.filter(function (g) { return g.r === "W"; }).length / a.length;
+    };
+    var raw = wr(f) - wr(s);
+    var k = (f.length + s.length) / (f.length + s.length + 12);
+    var gap = k * raw + (1 - k) * POOLED_TURN_GAP;
+    return Math.max(0.3, 1 - Math.max(0, gap - POOLED_TURN_GAP) / 0.35);
+  }
+
+  function score(games, L) {
+    var e = engineReliability(games, L);
+    var c2 = spread(games), c3 = turnOrder(games);
+    var parts = [[e.c1, 0.5]];
+    if (c2 !== null) parts.push([c2, 0.3]);
+    if (c3 !== null) parts.push([c3, 0.2]);
+    var w = parts.reduce(function (a, p) { return a + p[1]; }, 0);
+    var v = 1;
+    parts.forEach(function (p) { v *= Math.pow(Math.max(p[0], 1e-6), p[1] / w); });
+    return { index: 100 * v, c1: e.c1, c2: c2, c3: c3, engine: e };
+  }
+
+  /* The spread of the index itself. Matches are resampled whole, because the
+     games inside one match are not independent of each other. */
+  function interval(matches, L) {
+    if (matches.length < 4) return null;
+    var vals = [];
+    for (var r = 0; r < 200; r++) {
+      var pick = [];
+      for (var i = 0; i < matches.length; i++)
+        pick.push(matches[(Math.random() * matches.length) | 0]);
+      var g = gamesOf(pick);
+      if (g.length) vals.push(score(g, L).index);
+    }
+    if (vals.length < 50) return null;
+    vals.sort(function (a, b) { return a - b; });
+    return [vals[Math.floor(vals.length * 0.1)], vals[Math.floor(vals.length * 0.9)]];
+  }
+
+
+  /* A list fetched from Limitless carries the card's group; one typed or
+     pasted into the app does not, because the export format does not say.
+     So energy is recognised by name as well, and where the group is unknown
+     both marks are offered rather than guessing the card is a Trainer. */
+  function isEnergy(c) {
+    return c.group === "energy" || /\bEnergy$/i.test(c.name || "");
+  }
+
+  function couldBeBasic(c) {
+    return !isEnergy(c) && (!c.group || c.group === "pokemon");
+  }
+
+  function marksOf(d, c) {
+    var m = (d.cardClass || {})[c.name] || {};
+    var energy = isEnergy(c) || m.energy === true;
+    /* An older mark said only "engine"; treat it as search unless the card
+       looks like draw, so nothing ticked before this split is lost. */
+    var legacy = m.engine === true;
+    return {
+      basic: !!m.basic && !energy,
+      search: energy ? false
+        : m.search !== undefined ? !!m.search
+        : legacy ? !DRAW_GUESS.test(c.name || "") : SEARCH_GUESS.test(c.name || ""),
+      draw: energy ? false
+        : m.draw !== undefined ? !!m.draw
+        : legacy ? DRAW_GUESS.test(c.name || "") : DRAW_GUESS.test(c.name || ""),
+      energy: energy,
+      mine: m.by === "me",
+    };
+  }
+
+  function classesOf(d) {
+    var basic = 0, search = 0, draw = 0, energy = 0, total = 0, rows = [];
+    (d.list || []).forEach(function (c) {
+      var m = marksOf(d, c);
+      total += c.n;
+      if (m.energy) energy += c.n;
+      else if (m.basic) basic += c.n;          // a card that is both counts once
+      else if (m.search) search += c.n;
+      else if (m.draw) draw += c.n;
+      rows.push({ card: c, basic: m.basic, search: m.search, draw: m.draw, energy: m.energy });
+    });
+    return { basic: basic, search: search, draw: draw, engine: search + draw,
+             energy: energy, total: total, rows: rows };
+  }
+
+  /* ---- saying it plainly ------------------------------------------------
+     The person reading this is a teenager between rounds, not a statistician.
+     Every number is therefore also given as "x games in 10", the three checks
+     carry a colour, and the arithmetic that produced them is folded away
+     until it is asked for. */
+
+  function tone(v) { return v >= 0.85 ? "good" : v >= 0.7 ? "warn" : "bad"; }
+
+  function inTen(v) { return Math.round(v * 10); }
+
+  /* The word describes the weakest of the three checks, not the average of
+     them. An index of 86 held up by an even matchup spread, while the deck
+     still fails to start three games in ten, is not "rock solid" to the
+     person shuffling it — and the sentence underneath would contradict it. */
+  function verdict(s, games) {
+    var weakest = [s.c1, s.c2, s.c3].reduce(function (a, v) {
+      return v === null || v === undefined ? a : Math.min(a, v);
+    }, 1);
+    /* A dozen games cannot earn a verdict of any kind, and "Unreliable" on
+       eight of them would be read as a fact about the deck. */
+    if (games < 12) return { word: "Early days", cls: "warn" };
+    var word = weakest >= 0.85 ? "Rock solid"
+      : weakest >= 0.75 ? "Good, with one weak spot"
+      : weakest >= 0.65 ? "Shaky" : "Unreliable";
+    /* The headline takes its colour from the same scale as the check that
+       earned it, so an amber check never sits under a green verdict. */
+    return { word: word, cls: tone(weakest) };
+  }
+
+  function turnGap(games) {
+    var f = games.filter(function (g) { return g.first === true; });
+    var s2 = games.filter(function (g) { return g.first === false; });
+    if (f.length < 3 || s2.length < 3) return null;
+    var wr = function (a) {
+      return a.filter(function (g) { return g.r === "W"; }).length / a.length;
+    };
+    return wr(f) - wr(s2);
+  }
+
+  /* A round recorded on the phone carries the deck's NAME, because the phone
+     may not know its id yet; the computer attaches it on arrival. Anything
+     reading the database before that has to apply the same rule, or rounds
+     that are plainly there look missing - which is exactly how they looked
+     on the phone's own deck screen. Spelling aside, a name places a round.
+     The state handed in is never altered: a reader must not rewrite the
+     database it is only looking at. */
+  function normalName(s) {
+    return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function deckByName(decks, name) {
+    var key = normalName(name);
+    if (!key) return null;
+    for (var i = 0; i < (decks || []).length; i++)
+      if (normalName(decks[i].name) === key) return decks[i];
+    return null;
+  }
+
+  function withNamedRoundsAdopted(state) {
+    var decks = ((state.config || {}).decks) || [];
+    var known = {};
+    decks.forEach(function (d) { known[d.id] = 1; });
+    var touched = false;
+    var matches = (state.matches || []).map(function (m) {
+      if (m.demo || known[m.myDeck] || !m.deckName) return m;
+      var hit = deckByName(decks, m.deckName);
+      if (!hit) return m;
+      touched = true;
+      return Object.assign({}, m, { myDeck: hit.id });
+    });
+    if (!touched) return state;
+    return Object.assign({}, state, { matches: matches });
+  }
+
+  /* The headline and the three checks, which is all a phone needs: one index
+     with a word for it, how often the deck gets going, how even it is across
+     the field, and how much it leans on the coin flip. */
+  function summary(state, deckId) {
+    var decks = ((state.config || {}).decks) || [];
+    var d = decks.filter(function (x) { return x.id === deckId; })[0] || decks[0];
+    if (!d) return null;
+    var c = classesOf(d);
+    var L = c.total === DECK ? listConsistency(c.basic, c.engine, c.energy) : null;
+    var ms = (state.matches || []).filter(function (m) {
+      return !m.demo && m.myDeck === d.id;
+    });
+    var games = gamesOf(ms);
+    var s = L !== null && games.length ? score(games, L) : null;
+    return {
+      deck: d,
+      counts: c,
+      L: L,
+      mulligan: c.basic ? mulligan(c.basic).p : null,
+      rounds: ms.length,
+      games: games.length,
+      enough: ENOUGH,
+      score: s,
+      verdict: s ? verdict(s, games.length) : null,
+      interval: s ? interval(ms, L) : null,
+      turnGap: s ? turnGap(games) : null,
+      /* The plain-words results of the same rounds, so a phone does not have
+         to count wins a second time to show a record. */
+      record: ms.reduce(function (a, m) {
+        if (m.result === "W") a.w++;
+        else if (m.result === "L") a.l++;
+        else a.t++;
+        return a;
+      }, { w: 0, l: 0, t: 0 }),
+    };
+  }
+
+  /* ---- which round came last ------------------------------------------
+     A round carries the DAY it was played, and the app has always stamped
+     `ts` with noon of that day rather than the moment it was typed in. Ten
+     rounds played on one afternoon therefore all carry the same number, and
+     a plain sort by it leaves them where they were entered - oldest at the
+     top, which is exactly where the newest belongs. On a phone the screen
+     then looked frozen: the first game of the day sat at the head of "the
+     last ten" all evening while the newest fell off the end.
+
+     So: the day first; then the moment it was entered, for the rounds that
+     have one; and finally the position in the database, because a round
+     added later sits later in the file. The last rule is what puts years of
+     existing rounds - all stamped noon - into the right order without
+     touching a single one of them. */
+  function entryMoment(m) {
+    if (typeof m.enteredAt === "number" && m.enteredAt > 0) return m.enteredAt;
+    var ts = typeof m.ts === "number" ? m.ts : null;
+    if (ts === null || !m.date) return ts;
+    var noon = new Date(String(m.date) + "T12:00:00").getTime();
+    /* A stamp that is simply noon of the day says nothing about the hour. */
+    return isNaN(noon) || Math.abs(ts - noon) <= 60000 ? null : ts;
+  }
+
+  function newestFirst(matches) {
+    var rows = (matches || []).map(function (m, i) { return { m: m, i: i }; });
+    rows.sort(function (a, b) {
+      var byDay = String(b.m.date || "").localeCompare(String(a.m.date || ""));
+      if (byDay) return byDay;
+      var am = entryMoment(a.m), bm = entryMoment(b.m);
+      /* A round with a real moment is placed by it; one without is left to
+         its position, and the two are not compared against each other on a
+         number only one of them has. */
+      if (am !== null && bm !== null && am !== bm) return bm - am;
+      return b.i - a.i;
+    });
+    return rows.map(function (x) { return x.m; });
+  }
+
+  var api = {
+    DECK: DECK, ENOUGH: ENOUGH, PRIOR_GAMES: PRIOR_GAMES,
+    POOLED_TURN_GAP: POOLED_TURN_GAP, ENGINE_FAULT: ENGINE_FAULT,
+    SEARCH_GUESS: SEARCH_GUESS, DRAW_GUESS: DRAW_GUESS,
+    comb: comb, pMeets: pMeets, listConsistency: listConsistency,
+    completeStart: completeStart, mulligan: mulligan, atLeastOne: atLeastOne,
+    gamesOf: gamesOf, engineReliability: engineReliability, spread: spread,
+    turnOrder: turnOrder, score: score, interval: interval,
+    isEnergy: isEnergy, marksOf: marksOf, classesOf: classesOf,
+    couldBeBasic: couldBeBasic,
+    normalName: normalName, deckByName: deckByName,
+    withNamedRoundsAdopted: withNamedRoundsAdopted,
+    tone: tone, inTen: inTen, verdict: verdict, turnGap: turnGap,
+    summary: summary,
+    entryMoment: entryMoment, newestFirst: newestFirst,
+  };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.MatchupDeck = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+<script>/* Matchup Lab — GitHub-backed store for the mobile edition.
+ *
+ * Mirrors GitHubStore in sync.py so a phone and a computer can share one file.
+ * The access token never appears here: every call goes through a transport the
+ * host supplies (on iOS that is Swift, reading the token from the Keychain),
+ * so the web layer cannot read, log or leak it.
+ *
+ *   transport(method, url, bodyObject) -> Promise<{status, json}>
+ */
+(function (root) {
+  "use strict";
+  var merge = (typeof require === "function") ? require("./merge.js") : root.MatchupMerge;
+
+  function b64encodeUtf8(str) {
+    var bytes = new TextEncoder().encode(str), bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64decodeUtf8(b64) {
+    var bin = atob((b64 || "").replace(/\s+/g, ""));
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+  function serialize(state) { return JSON.stringify(state, null, 1); }
+
+  function GhStore(cfg, transport) {
+    this.repo = String(cfg.repo || "").trim().replace(/^\/+|\/+$/g, "");
+    this.path = String(cfg.path || "data.json").trim().replace(/^\/+/, "");
+    this.branch = String(cfg.branch || "main").trim();
+    this.base = String(cfg.apiBase || "https://api.github.com").replace(/\/+$/, "");
+    this.transport = transport;
+    this.sha = null;
+    this.message = "";
+    this.lastPull = null;
+    this.lastPush = null;
+  }
+
+  GhStore.prototype.enabled = function () {
+    return !!(this.repo && this.repo.indexOf("/") > 0);
+  };
+  GhStore.prototype._readUrl = function () {
+    return this.base + "/repos/" + this.repo + "/contents/" + this.path + "?ref=" + encodeURIComponent(this.branch);
+  };
+  GhStore.prototype._writeUrl = function () {
+    return this.base + "/repos/" + this.repo + "/contents/" + this.path;
+  };
+
+  GhStore.prototype.pull = function () {
+    var self = this;
+    return this.transport("GET", this._readUrl(), null).then(function (r) {
+      if (r.status === 404) {
+        self.sha = null; self.lastPull = Date.now();
+        self.message = "no file in the repository yet — the first save creates it";
+        return null;
+      }
+      if (r.status < 200 || r.status >= 300) throw httpError(r);
+      self.sha = r.json && r.json.sha;
+      var text = b64decodeUtf8((r.json && r.json.content) || "");
+      self.lastPull = Date.now(); self.message = "";
+      return text.trim() ? JSON.parse(text) : null;
+    });
+  };
+
+  GhStore.prototype.push = function (state, note) {
+    var self = this;
+    var body = {
+      message: note || "update from Matchup Lab",
+      content: b64encodeUtf8(serialize(state)),
+      branch: this.branch
+    };
+    if (this.sha) body.sha = this.sha;
+    return this.transport("PUT", this._writeUrl(), body).then(function (r) {
+      if (r.status === 409 || r.status === 422) {
+        // someone else wrote it meanwhile: take their copy, merge, write again
+        return self.pull().then(function (remote) {
+          var merged = merge.mergeStates(remote || {}, state);
+          body.content = b64encodeUtf8(serialize(merged));
+          if (self.sha) body.sha = self.sha; else delete body.sha;
+          return self.transport("PUT", self._writeUrl(), body).then(function (r2) {
+            if (r2.status < 200 || r2.status >= 300) throw httpError(r2);
+            self.sha = r2.json && r2.json.content && r2.json.content.sha;
+            self.lastPush = Date.now();
+            self.message = "merged with a change made elsewhere";
+            return merged;
+          });
+        });
+      }
+      if (r.status < 200 || r.status >= 300) throw httpError(r);
+      self.sha = r.json && r.json.content && r.json.content.sha;
+      self.lastPush = Date.now(); self.message = "";
+      return state;
+    });
+  };
+
+  /* Always pull and merge before writing, so an empty or stale device can
+     never blank out what the others have. Same rule as the desktop server. */
+  GhStore.prototype.syncNow = function (localState) {
+    var self = this;
+    return this.pull().then(function (remote) {
+      var merged = merge.mergeStates(remote || {}, localState || {});
+      return self.push(merged).then(function (written) { return written || merged; });
+    });
+  };
+
+  function httpError(r) {
+    var msg = (r.json && (r.json.message || r.json.error)) || ("HTTP " + r.status);
+    var e = new Error(msg); e.status = r.status; return e;
+  }
+
+  function describeError(e) {
+    var s = e && e.status;
+    if (s === 401) return "GitHub rejected the token (401). Check it has not expired.";
+    if (s === 403) return "GitHub refused access (403). The token needs Contents: read and write on this repository.";
+    if (s === 404) return "Repository or branch not found (404). Check the name and branch.";
+    if (s) return "GitHub returned " + s + ". " + (e.message || "");
+    return "No connection to GitHub (" + ((e && e.message) || e) + ").";
+  }
+
+  var api = { GhStore: GhStore, describeError: describeError, _b64: b64encodeUtf8, _unb64: b64decodeUtf8 };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.MatchupGh = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+<script>
+"use strict";
+var ARCH = [{"id": "dragapult-ex", "name": "Dragapult", "share": 14.11}, {"id": "dhelmise-pbl", "name": "Dhelmise", "share": 5.6}, {"id": "basic-box-m", "name": "Basic Box", "share": 5.07}, {"id": "slowking-scr", "name": "Slowking", "share": 4.7}, {"id": "sharpedo-toxtricity", "name": "Sharpedo Toxtricity", "share": 4.58}, {"id": "n-zoroark", "name": "N's Zoroark", "share": 3.97}, {"id": "dragapult-blaziken", "name": "Dragapult Blaziken", "share": 3.76}, {"id": "lucario-hariyama", "name": "Lucario Hariyama", "share": 3.68}, {"id": "ogerpon-meganium-hydrapple", "name": "Ogerpon Meganium Hydrapple", "share": 3.11}, {"id": "mega-excadrill-ex", "name": "Mega Excadrill", "share": 3.07}, {"id": "alakazam-dusknoir", "name": "Alakazam Dusknoir", "share": 2.99}, {"id": "alakazam-dudunsparce", "name": "Alakazam Dudunsparce", "share": 2.82}, {"id": "dragapult-dusknoir", "name": "Dragapult Dusknoir", "share": 2.58}, {"id": "festival-lead", "name": "Festival Lead", "share": 2.58}, {"id": "crustle-dri", "name": "Crustle", "share": 1.96}, {"id": "mega-greninja-ex", "name": "Mega Greninja", "share": 1.88}, {"id": "toucannon-pbl", "name": "Toucannon", "share": 1.8}, {"id": "cynthia-garchomp-ex", "name": "Cynthia's Garchomp", "share": 1.76}, {"id": "lopunny-dusknoir", "name": "Lopunny Dusknoir", "share": 1.51}, {"id": "lopunny-dudunsparce", "name": "Lopunny Dudunsparce", "share": 1.47}, {"id": "grimmsnarl-froslass", "name": "Grimmsnarl Froslass", "share": 1.39}, {"id": "mew-ex-30c", "name": "Mew Box", "share": 1.35}, {"id": "ogerpon-meganium-arboliva", "name": "Ogerpon Meganium Arboliva", "share": 1.27}, {"id": "mega-lucario-ex", "name": "Mega Lucario", "share": 1.27}, {"id": "greninja-ex", "name": "Greninja", "share": 1.23}, {"id": "starmie-froslass", "name": "Starmie Froslass", "share": 1.06}, {"id": "other", "name": "Other / rogue", "share": 19.43}];
+var REASONS = [["", "No reason given"], ["donk", "Donk — lost before turn 3"], ["start", "Dead opening / mulligans"], ["draw", "Draw chain broke"], ["prize", "Prize mapping"], ["tempo", "Lost tempo after turn 1"], ["lock", "Ability or supporter lock"], ["plan", "Prize-trade plan error"], ["misplay", "My own misplay"], ["deck", "Gap in the deck list"], ["time", "Ran out of time"], ["matchup", "The matchup is simply bad"], ["brick", "Brick — the hand never got going"]];
+var EVENTS = {"test": "Practice / ladder", "league": "Local league", "cup": "Cup / Challenge", "regional": "Regional and above"};
+var LS = "matchup-lab-phone-v1";
+var CFG = "matchup-lab-phone-cfg";
+
+function $(s){ return document.querySelector(s); }
+function el(tag, cls, text){ var e=document.createElement(tag); if(cls) e.className=cls;
+  if(text!=null) e.textContent=text; return e; }
+function load(){ try{ return JSON.parse(localStorage.getItem(LS)) || []; }catch(e){ return []; } }
+function save(rows){ try{ localStorage.setItem(LS, JSON.stringify(rows)); }catch(e){
+  alert("This phone refused to store the round. Free some space and try again."); } }
+function cfg(){ try{ return JSON.parse(localStorage.getItem(CFG)) || {}; }catch(e){ return {}; } }
+function setCfg(c){ try{ localStorage.setItem(CFG, JSON.stringify(c)); }catch(e){} }
+
+/* ---- the form ---------------------------------------------------------- */
+var draft = { bo:3, games:[{},{},{}] };
+
+/* Which deck the rounds belong to.
+
+   Two ways in, so the logger is useful whether or not sync is set up. With a
+   repository configured it can read the real deck list, ids and all, and the
+   round lands in the right place with nothing to do on the computer. Without
+   one you type a name, which the computer matches by name on arrival. Every
+   round carries the name as well as the id, so a round is never anonymous. */
+function knownDecks(){
+  var c = cfg();
+  return Array.isArray(c.decks) ? c.decks : [];
+}
+
+/* What the phone needs to know about a deck: its name, so a round can be
+   placed, and its list versions, so a round says which sixty cards played
+   it. Not the cards themselves - the Deck screen keeps those separately and
+   this list is read on every save. */
+function slimDeck(d){
+  return { id: d.id, name: d.name || d.id,
+           currentVersion: d.currentVersion || null,
+           versions: (d.versions || []).map(function(v){
+             return { id: v.id, label: v.label || "", createdAt: v.createdAt || null };
+           }) };
+}
+
+function deckById(id){
+  var list = knownDecks();
+  for (var i=0;i<list.length;i++) if (list[i].id && list[i].id === id) return list[i];
+  return null;
+}
+
+/* Which version this round was played with.
+
+   The app records it on every round and compares versions against each
+   other; a round arriving from the phone without one used to land in "no
+   version attached" and quietly sat out of that comparison. The default is
+   the version the computer last said was current, which is what is in the
+   sleeves nearly every time, and the choice is remembered per deck so a few
+   rounds with an older list do not have to be set one by one. */
+function versionFor(deckId){
+  var c = cfg(), by = c.versionBy || {};
+  var d = deckById(deckId);
+  if (!d) return "";
+  var want = by[deckId];
+  var has = function(id){
+    return (d.versions || []).some(function(v){ return v.id === id; });
+  };
+  if (want === "") return "";                      // chosen on purpose
+  if (want && has(want)) return want;
+  return has(d.currentVersion) ? d.currentVersion : "";
+}
+
+function fillVersions(){
+  var wrap = $("#versionWrap"), sel = $("#version"), note = $("#versionNote");
+  var c = cfg(), d = c.deckId ? deckById(c.deckId) : null;
+  var versions = (d && d.versions) || [];
+  if (!versions.length) { wrap.hidden = true; sel.innerHTML = ""; return; }
+  wrap.hidden = false;
+  sel.innerHTML = "";
+  versions.slice().reverse().forEach(function(v){
+    sel.appendChild(new Option(v.label + (v.id === d.currentVersion ? "  (current)" : ""), v.id));
+  });
+  sel.appendChild(new Option("Not sure — leave it off", ""));
+  sel.value = versionFor(c.deckId);
+  showVersionNote();
+}
+
+function showVersionNote(){
+  var note = $("#versionNote"), c = cfg(), d = c.deckId ? deckById(c.deckId) : null;
+  if (!d) { note.textContent = ""; return; }
+  var chosen = $("#version").value;
+  note.className = "note";
+  if (!chosen) {
+    note.textContent = "The round will show as “no version attached” on the computer.";
+  } else if (chosen === d.currentVersion) {
+    note.textContent = "The version the computer last said was current. Read again on the Send "
+      + "screen if the list changed since.";
+  } else {
+    note.textContent = "An older list — this stays chosen for this deck until you change it.";
+  }
+}
+function rememberDeck(id, name){
+  var c = cfg(), list = Array.isArray(c.decks) ? c.decks : [];
+  var at = -1;
+  for (var i=0;i<list.length;i++){
+    if ((id && list[i].id === id) || (!id && !list[i].id && list[i].name === name)) { at = i; break; }
+  }
+  if (at < 0) list.push({ id: id || "", name: name });
+  c.decks = list; c.deckId = id || ""; c.deckName = name;
+  setCfg(c);
+}
+function fillDecks(){
+  var sel = $("#mydeck"), c = cfg(), list = knownDecks();
+  sel.innerHTML = "";
+  if (!list.length) {
+    var none = new Option("No deck yet — tap “+ New deck”", "");
+    none.disabled = true;
+    sel.appendChild(none);
+  }
+  list.forEach(function(d){
+    var o = new Option(d.name + (d.id ? "" : "  (typed here)"), d.id ? "id:" + d.id : "nm:" + d.name);
+    sel.appendChild(o);
+  });
+  var want = c.deckId ? "id:" + c.deckId : (c.deckName ? "nm:" + c.deckName : "");
+  sel.value = want && [].some.call(sel.options, function(o){ return o.value === want; }) ? want : "";
+  showDeckNote();
+  fillVersions();
+}
+function showDeckNote(){
+  var n = $("#deckNote"), c = cfg();
+  if (!c.deckName) {
+    n.textContent = "Pick or name the deck you are playing, so the rounds land in the right place.";
+    n.className = "note warn-note";
+  } else if (c.deckId) {
+    n.textContent = "Rounds go straight to " + c.deckName + " on the computer.";
+    n.className = "note";
+  } else {
+    n.textContent = "Saved as “" + c.deckName + "”. The computer will match it by name.";
+    n.className = "note";
+  }
+}
+function askDeckName(){
+  var name = (window.prompt("Name of the deck you are playing") || "").trim();
+  if (!name) { fillDecks(); return; }
+  rememberDeck("", name.slice(0, 60));
+  fillDecks();
+}
+
+function fillSelects(){
+  var opp=$("#opp");
+  ARCH.slice().sort(function(a,b){ return b.share-a.share; }).forEach(function(a){
+    opp.appendChild(new Option(a.name + "  (" + a.share.toFixed(1) + "% of field)", a.id));
+  });
+  opp.appendChild(new Option("Other / not listed", "other"));
+  var ev=$("#event");
+  Object.keys(EVENTS).forEach(function(k){ ev.appendChild(new Option(EVENTS[k], k)); });
+  ev.value = cfg().event || "test";
+  $("#bo").value = String(cfg().bo || 3);
+}
+
+function renderGames(){
+  var box=$("#games"); box.innerHTML="";
+  var n = draft.bo === 1 ? 1 : 3;
+  for(var i=0;i<n;i++){
+    (function(i){
+      var g = draft.games[i] || (draft.games[i] = {});
+      var wrap = el("div", i ? "game" : "");
+      wrap.appendChild(el("h3", null, n===1 ? "Result" : "Game " + (i+1)));
+      var seg = el("div","seg");
+      [["W","Win"],["L","Loss"],["T","Tie"]].forEach(function(p){
+        var btn=el("button",null,p[1]); btn.dataset.r=p[0];
+        btn.setAttribute("aria-pressed", String(g.r===p[0]));
+        btn.onclick=function(){ g.r = (g.r===p[0] ? undefined : p[0]); renderGames(); };
+        seg.appendChild(btn);
+      });
+      wrap.appendChild(seg);
+      /* Who started is known before the game ends and decides half the
+         matchups, so the buttons are there from the start rather than
+         appearing once a result is marked. */
+      var who = el("div","pick"); who.style.marginTop="8px";
+      [[true,"I went first"],[false,"Opponent first"]].forEach(function(p){
+        var btn=el("button",null,p[1]);
+        btn.setAttribute("aria-pressed", String(g.first===p[0]));
+        btn.onclick=function(){ g.first = (g.first===p[0] ? undefined : p[0]); renderGames(); };
+        who.appendChild(btn);
+      });
+      wrap.appendChild(who);
+      if(g.r==="L"){
+        var lab=el("label","lbl","Why this game was lost"); lab.style.marginTop="10px";
+        wrap.appendChild(lab);
+        var sel=el("select");
+        REASONS.forEach(function(r){ sel.appendChild(new Option(r[1], r[0])); });
+        sel.value = g.reason || "";
+        sel.onchange=function(){ g.reason = sel.value; };
+        wrap.appendChild(sel);
+      }
+      /* A won game is worth a line too: the reason list above only opens on a
+         loss, which left nowhere to note how a game actually went. */
+      if(g.r){
+        var nlab=el("label","lbl","Note about this game"); nlab.style.marginTop="10px";
+        wrap.appendChild(nlab);
+        var gn=el("input"); gn.type="text"; gn.maxLength=300; gn.value=g.note || "";
+        gn.placeholder="A good line, a close call, a lucky prize…";
+        gn.oninput=function(){ g.note = gn.value; };
+        wrap.appendChild(gn);
+      }
+      box.appendChild(wrap);
+    })(i);
+  }
+}
+
+function seriesResult(games){
+  var w=0,l=0,t=0;
+  games.forEach(function(g){ if(g.r==="W")w++; else if(g.r==="L")l++; else if(g.r==="T")t++; });
+  if(w>l) return "W";
+  if(l>w) return "L";
+  return "T";
+}
+
+function uid(){
+  return "ph-" + Date.now().toString(36) + "-" +
+    Math.random().toString(36).slice(2,10);
+}
+
+/* The same round, saved twice.
+ *
+ * It happened at a Regional: the same opponent, the same three games, two
+ * entries minutes apart. On a phone between rounds it is an easy slip - the
+ * button is large, the hall is loud, and nothing on screen says the round
+ * already went in. Once it has been sent there is no undoing it from here,
+ * so the only place to catch it is before it is saved.
+ *
+ * The test is deliberately narrow: the same deck, the same opponent, the
+ * same format and the same results in the same order, within the last few
+ * minutes. Two real rounds against one archetype in one afternoon are
+ * perfectly normal, but two with an identical game-by-game line inside a
+ * quarter of an hour are nearly always one round entered twice. And it
+ * asks rather than refuses: the player knows which it was.
+ */
+var SAME_WITHIN = 15 * 60 * 1000;
+
+function sameAs(row, prior){
+  if(prior.opp !== row.opp || prior.bo !== row.bo) return false;
+  if((prior.deckId || "") !== (row.deckId || "")) return false;
+  if((prior.deckName || "") !== (row.deckName || "")) return false;
+  var a = prior.games || [], b = row.games || [];
+  if(a.length !== b.length) return false;
+  for(var i=0;i<a.length;i++){
+    if(a[i].r !== b[i].r) return false;
+    if((a[i].first === undefined ? null : a[i].first) !==
+       (b[i].first === undefined ? null : b[i].first)) return false;
+  }
+  return true;
+}
+
+function alreadySaved(row){
+  var now = Date.now();
+  var hit = load().filter(function(r){
+    return now - (r.ts || 0) < SAME_WITHIN && sameAs(row, r);
+  }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); })[0];
+  return hit || null;
+}
+
+$("#save").onclick = function(){
+  var n = draft.bo === 1 ? 1 : 3;
+  var games = draft.games.slice(0,n).filter(function(g){ return g.r; });
+  if(!games.length){ alert("Mark the result of at least one game."); return; }
+  if(!cfg().deckName){ askDeckName(); if(!cfg().deckName) return; }
+  var c0 = cfg();
+  var row = {
+    id: uid(),
+    deckId: c0.deckId || "",
+    deckName: c0.deckName || "",
+    /* Which sixty cards played this round. Empty when the deck was typed in
+       here rather than read from the computer, because then there is no
+       version to name and guessing one would be worse than saying nothing. */
+    listVersion: c0.deckId ? versionFor(c0.deckId) : "",
+    opp: $("#opp").value,
+    bo: draft.bo,
+    games: games.map(function(g){
+      var o = { r:g.r };
+      if(g.first !== undefined) o.first = g.first;
+      if(g.reason) o.reason = g.reason;
+      if(g.note) o.note = g.note;
+      return o;
+    }),
+    event: $("#event").value,
+    note: $("#note").value.trim(),
+    comment: $("#comment").value.trim(),
+    date: new Date().toISOString().slice(0,10),
+    ts: Date.now(),
+    fromPhone: true
+  };
+  row.result = seriesResult(row.games);
+  var twin = alreadySaved(row);
+  if(twin){
+    var mins = Math.max(1, Math.round((Date.now() - (twin.ts || 0)) / 60000));
+    if(!confirm("You already saved this round " + mins + " minute" + (mins===1?"":"s") +
+       " ago:\n\n" + labelFor(row.opp) + " — " + row.result + " (" +
+       row.games.map(function(g){ return g.r; }).join("·") + ")\n\n" +
+       "Save it a second time?")) return;
+  }
+  var rows = load(); rows.push(row); save(rows);
+  setCfg(Object.assign(cfg(), { event: row.event, bo: draft.bo }));
+  draft = { bo: draft.bo, games:[{},{},{}] };
+  $("#note").value = "";
+  $("#comment").value = "";
+  renderGames(); refresh();
+  var s=$("#sub"); var was=s.textContent;
+  s.textContent = "Saved: " + labelFor(row.opp) + " — " + row.result + ". " + rows.length + " held on this phone.";
+  setTimeout(function(){ s.textContent = was; }, 2600);
+};
+
+function labelFor(id){
+  var a = ARCH.filter(function(x){ return x.id===id; })[0];
+  return a ? a.name : (id==="other" ? "Other" : id);
+}
+
+$("#bo").onchange = function(){ draft.bo = Number(this.value); renderGames(); };
+
+/* ---- held rounds, sending ---------------------------------------------- */
+function refresh(){
+  var rows = load();
+  $("#badge").textContent = String(rows.length);
+  $("#held").textContent = String(rows.length);
+  var list = $("#list"); list.innerHTML = "";
+  rows.slice().reverse().forEach(function(r){
+    var it = el("div","item");
+    var left = el("div");
+    left.appendChild(el("b", null, labelFor(r.opp)));
+    var bits = r.games.map(function(g){ return g.r; }).join(" ");
+    left.appendChild(el("div","meta", r.date + " · " + (EVENTS[r.event]||r.event) + " · " + bits +
+      (r.sent ? " · sent" : "")));
+    it.appendChild(left);
+    var right = el("div","row-right");
+    right.appendChild(el("div","res " + r.result, r.result));
+    var del = el("button","del","\u2715");
+    del.type = "button";
+    del.setAttribute("aria-label","Delete this round");
+    del.onclick = function(ev){ ev.stopPropagation(); removeRound(r.id); };
+    right.appendChild(del);
+    it.appendChild(right);
+    it.onclick = function(){ removeRound(r.id); };
+    list.appendChild(it);
+  });
+  if(!rows.length) list.appendChild(el("p","note","Nothing recorded yet."));
+  var th = $("#tapHint"); if(th) th.style.display = rows.length ? "" : "none";
+}
+
+$("#tabsync").onclick = function(){
+  var a=$("#screen-log"), b=$("#screen-sync");
+  var toSync = b.classList.contains("hidden");
+  b.classList.toggle("hidden", !toSync);
+  a.classList.toggle("hidden", toSync);
+  $("#save").style.display = toSync ? "none" : "";
+  this.firstChild.textContent = toSync ? "Back" : "Send";
+  if(toSync) renderSyncState();
+  window.scrollTo(0,0);
+};
+
+function renderSyncState(){
+  var c = cfg(), box = $("#syncState");
+  box.innerHTML = "";
+  box.appendChild(el("h3", null, "Status")).style.cssText="margin:0 0 8px;font-size:15px";
+  var rows = load(), unsent = rows.filter(function(r){ return !r.sent; }).length;
+  box.appendChild(el("p","note", c.repo ? ("Connected to " + c.repo + ".") :
+    "No repository saved yet. You can still move a file by hand."));
+  box.appendChild(el("p","note", unsent + " round" + (unsent===1?"":"s") + " waiting to be sent."));
+  if(c.lastSync) box.appendChild(el("p","note","Last sent " + new Date(c.lastSync).toLocaleString()));
+  $("#repo").value = c.repo || "";
+}
+
+function phoneRowsAsState(rows, deckId){
+  /* Each round carries the deck it was played with: the real id when the deck
+     list has been read from the database, otherwise the name you typed, which
+     the computer matches on arrival. */
+  return {
+    config: {}, drills: [], trash: [],
+    matches: rows.map(function(r){
+      var m = JSON.parse(JSON.stringify(r));
+      m.myDeck = r.deckId || deckId || "__phone__";
+      if (r.deckName) m.deckName = r.deckName;
+      delete m.sent;
+      return m;
+    }),
+    _updatedAt: Date.now(), _tombstones: {}
+  };
+}
+
+$("#connect").onclick = function(){
+  /* A paste on a phone arrives with stray spaces, a newline, or the quotes a
+     password manager wraps it in, and any of those makes GitHub answer 401. */
+  var repo = $("#repo").value.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "");
+  var token = $("#token").value.replace(/\s+/g, "").replace(/^["']|["']$/g, "");
+  var msg = $("#syncMsg");
+  if(repo.indexOf("/") < 1){ msg.textContent = "Write the repository as owner/name, for example rakerw/matchup-lab-data."; return; }
+  if(!token && !cfg().token){ msg.textContent = "The token field is empty — the paste did not land. Tap the field, hold, and choose Paste."; return; }
+  if(token && token.length < 20){ msg.textContent = "That token looks cut short (" + token.length + " characters). GitHub tokens are about 40 or 90. Copy the whole line."; return; }
+  var c = cfg(); c.repo = repo; if(token) c.token = token; setCfg(c);
+  $("#token").value = "";
+  sendNow();
+};
+
+function sendNow(){
+  var c = cfg(), msg = $("#syncMsg");
+  if(!c.repo || !c.token){ msg.textContent = "Save the repository and token first."; return; }
+  var rows = load(), pending = rows.filter(function(r){ return !r.sent; });
+  if(!pending.length){ msg.textContent = "Nothing new to send."; return; }
+  msg.textContent = "Sending…"; msg.className = "note";
+  var transport = function(method, url, body){
+    return fetch(url, {
+      method: method,
+      headers: {
+        "Authorization": "Bearer " + c.token,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json"
+      },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){
+      return r.text().then(function(t){
+        var j = null; try{ j = JSON.parse(t); }catch(e){}
+        return { status: r.status, json: j };
+      });
+    });
+  };
+  var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
+                                      branch: c.branch || "main" }, transport);
+  store.syncNow(phoneRowsAsState(pending, c.deckId))
+    .then(function(){
+      var all = load();
+      all.forEach(function(r){ if(!r.sent && pending.some(function(p){ return p.id===r.id; })) r.sent = true; });
+      save(all);
+      c.lastSync = Date.now(); setCfg(c);
+      msg.textContent = "Sent " + pending.length + " round" + (pending.length===1?"":"s") + ".";
+      msg.className = "note ok";
+      refresh(); renderSyncState();
+    })
+    .catch(function(e){
+      msg.textContent = MatchupGh.describeError(e);
+      msg.className = "note bad";
+    });
+}
+
+$("#share").onclick = function(){
+  var rows = load();
+  if(!rows.length){ $("#shareMsg").textContent = "Nothing recorded yet."; return; }
+  var payload = JSON.stringify(phoneRowsAsState(rows, cfg().deckId), null, 1);
+  var name = "matchup-lab-phone-" + new Date().toISOString().slice(0,10) + ".json";
+  var file = null;
+  try { file = new File([payload], name, { type: "application/json" }); } catch(e){}
+  if(file && navigator.canShare && navigator.canShare({ files: [file] })){
+    navigator.share({ files: [file], title: "Matchup Lab rounds" })
+      .then(function(){ $("#shareMsg").textContent = "Shared."; })
+      .catch(function(){ $("#shareMsg").textContent = "Sharing was cancelled."; });
+    return;
+  }
+  var url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+  var a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  $("#shareMsg").textContent = "If nothing opened, press and hold this button and choose Download.";
+};
+
+function removeRound(id){
+  var rows = load(), hit = null;
+  for(var i=0;i<rows.length;i++){ if(rows[i].id === id){ hit = rows[i]; break; } }
+  if(!hit) return;
+  var warn = hit.sent ? "" : "\n\nThis round has not been sent anywhere yet.";
+  if(!confirm("Delete the round against " + labelFor(hit.opp) + " (" + hit.result + ")?" + warn)) return;
+  save(rows.filter(function(r){ return r.id !== id; }));
+  refresh(); renderSyncState();
+}
+
+$("#wipe").onclick = function(){
+  var rows = load(), kept = rows.filter(function(r){ return !r.sent; });
+  if(!rows.length){ alert("Nothing recorded yet."); return; }
+  if(kept.length === rows.length){
+    alert("None of these " + rows.length + " round" + (rows.length===1?"":"s") +
+      (rows.length===1?" has":" have") + " been sent yet, so there is nothing safe to clear here.\n\n" +
+      "Tap a single round in the list to delete just that one, or use Clear every round.");
+    return;
+  }
+  if(!confirm("Remove " + (rows.length - kept.length) + " rounds already sent?")) return;
+  save(kept); refresh(); renderSyncState();
+};
+
+$("#wipeAll").onclick = function(){
+  var rows = load();
+  if(!rows.length){ alert("Nothing recorded yet."); return; }
+  var unsent = rows.filter(function(r){ return !r.sent; }).length;
+  var msg = "Delete all " + rows.length + " round" + (rows.length===1?"":"s") + " on this phone?";
+  if(unsent) msg += "\n\n" + unsent + " of them " + (unsent===1?"has":"have") +
+    " not been sent anywhere yet. Once deleted " + (unsent===1?"it is":"they are") + " gone for good.";
+  if(!confirm(msg)) return;
+  if(unsent && !confirm("Last check: " + unsent + " unsent round" + (unsent===1?"":"s") +
+    " will be lost. Delete anyway?")) return;
+  save([]); refresh(); renderSyncState();
+  $("#shareMsg").textContent = ""; $("#syncMsg").textContent = "The logger is empty.";
+};
+
+/* Decks are read on demand, and the phone keeps the answer. A deck added on
+   the computer therefore appears here only once the list is read again, which
+   is why this runs by itself every time the page opens - quietly, so a phone
+   with no signal says nothing and the logger stays usable. */
+function pullDecks(quiet){
+  var c = cfg(), msg = $("#syncMsg");
+  if(!c.repo || !c.token){
+    if(!quiet){ msg.textContent = "Save the repository and token first."; }
+    return;
+  }
+  var btn = $("#loaddecks"); btn.disabled = true;
+  var say = function(text, cls){ if(quiet) return; msg.textContent = text; if(cls) msg.className = cls; };
+  if(!quiet) msg.textContent = "Reading the deck list…";
+  var transport = function(method, url, body){
+    /* no-store: GitHub's contents endpoint is cacheable, and a phone that
+       answered from its own cache would show yesterday's database while
+       saying it had just read it. */
+    return fetch(url, { method: method, cache: "no-store",
+      headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
+                 "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){ return r.text().then(function(t){
+      var j=null; try{ j=JSON.parse(t); }catch(e){}
+      return { status: r.status, json: j }; }); });
+  };
+  var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
+                                      branch: c.branch || "main" }, transport);
+  var before = knownDecks().slice();
+  store.pull().then(function(remote){
+    /* A 404 reads the same as an empty file, and the two need different
+       fixes, so say which repository was read and what was missing. */
+    if (!remote) {
+      say("No " + (c.path || "data.json") + " in " + c.repo +
+        ". That is the private data repository the computer syncs to — not the one " +
+        "the logger page itself is published from. Check the name, and that the token " +
+        "has read access to it.", "note bad");
+      return;
+    }
+    var decks = (remote && remote.config && remote.config.decks) || [];
+    decks = decks.filter(function(d){ return d && d.id && !d.archived; })
+                 .map(function(d){ return slimDeck(d); });
+    if(!decks.length){
+      say("Read " + c.repo + ", but it holds no decks yet. Sync once " +
+        "from the computer first.", "note bad");
+      return;
+    }
+    var cc = cfg();
+    var typed = (Array.isArray(cc.decks) ? cc.decks : []).filter(function(d){ return !d.id; });
+    cc.decks = decks.concat(typed);
+    setCfg(cc);
+    var added = decks.filter(function(d){
+      return !before.some(function(o){ return o.id === d.id; });
+    });
+    fillDecks();
+    if (quiet && added.length) {
+      msg.textContent = added.length === 1
+        ? "New deck from the computer: " + added[0].name + "."
+        : added.length + " new decks from the computer.";
+      msg.className = "note ok";
+    }
+    say("Loaded " + decks.length + " deck" + (decks.length===1?"":"s") + ".", "note ok");
+  }).catch(function(e){
+    say("Could not read the deck list: " + (e && e.message ? e.message : e), "note bad");
+  }).then(function(){ btn.disabled = false; });
+}
+$("#loaddecks").onclick = function(){ pullDecks(false); };
+
+/* ---- the deck, read only -------------------------------------------------
+   Everything on this screen comes from the shared database and nothing on it
+   can be changed from the phone. The snapshot is kept here so the screen
+   still answers on a tournament floor with no signal; when it is showing an
+   old copy it says so, with the time it was read. */
+var SNAP = "matchup-lab-phone-snapshot";
+
+function snapshot(){
+  try{ return JSON.parse(localStorage.getItem(SNAP)) || null; }catch(e){ return null; }
+}
+function keepSnapshot(state){
+  try{
+    /* The rounds and the two config branches the screen needs - not the whole
+       database, which does not belong in a browser's storage any longer than
+       it has to. */
+    localStorage.setItem(SNAP, JSON.stringify({
+      at: Date.now(),
+      state: {
+        matches: (state.matches || []).slice(-400),
+        config: {
+          active: (state.config || {}).active,
+          target: (state.config || {}).target,
+          nextEvent: (state.config || {}).nextEvent,
+          decks: ((state.config || {}).decks || []).map(function(d){
+            return { id: d.id, name: d.name, archived: d.archived, archetype: d.archetype,
+                     list: d.list, cardClass: d.cardClass,
+                     /* Labels only. The cards of every past version would be
+                        the bulk of the database, and nothing here draws
+                        them - but a round has to be able to name the list
+                        it was played with. */
+                     versions: (d.versions || []).map(function(v){
+                       return { id: v.id, label: v.label || "", createdAt: v.createdAt || null };
+                     }),
+                     currentVersion: d.currentVersion };
+          }),
+          meta: { entries: (((state.config || {}).meta) || {}).entries || [],
+                  asOf: (((state.config || {}).meta) || {}).asOf || "" }
+        }
+      }
+    }));
+  }catch(e){ /* a full or private store is not a reason to fail the screen */ }
+}
+
+function fmtWhen(ms){
+  var d = new Date(ms);
+  return d.toLocaleDateString(undefined,{day:"numeric",month:"short"}) + ", " +
+         d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
+}
+function fmtDate(s){
+  var d = MatchupPlan.asDate(s);
+  return d ? d.toLocaleDateString(undefined,{day:"numeric",month:"short"}) : String(s||"");
+}
+
+function deckState(){
+  var s = snapshot();
+  if(!s || !s.state) return null;
+  /* Rounds sent from this phone sit in the database under "__phone__" with
+     the deck's name beside them until the computer next opens and attaches
+     them. Read through the same rule the computer uses, or a round played an
+     hour ago looks like it never happened. */
+  try{ return MatchupDeck.withNamedRoundsAdopted(s.state); }catch(e){ return s.state; }
+}
+
+/* Rounds still waiting on this phone are not in the database at all. They
+   belong on this screen too - they are the ones just played - but marked,
+   so it is clear which the computer has and which it has not. */
+function pendingRounds(deck){
+  var c = cfg();
+  return load().filter(function(r){
+    if(r.sent) return false;
+    if(r.deckId && deck.id && r.deckId === deck.id) return true;
+    if(r.deckName && deck.name) return MatchupDeck.normalName(r.deckName) === MatchupDeck.normalName(deck.name);
+    return !r.deckId && !r.deckName && c.deckId === deck.id;
+  }).map(function(r){
+    return { id: r.id, myDeck: deck.id, opp: r.opp, result: r.result, bo: r.bo,
+             date: r.date, ts: r.ts, note: r.note, comment: r.comment,
+             games: r.games, unsent: true };
+  });
+}
+
+function chosenDeck(){
+  var st = deckState(); if(!st) return null;
+  var want = $("#deckview").value || (st.config||{}).active;
+  var ds = ((st.config||{}).decks || []).filter(function(d){ return d && d.id; });
+  return ds.filter(function(d){ return d.id === want; })[0] || ds[0] || null;
+}
+
+function groupCards(deck){
+  var marks = deck.cardClass || {};
+  var out = { "Pokémon": [], "Trainers": [], "Energy": [], "Not read yet": [] };
+  (deck.list || []).forEach(function(c){
+    var m = marks[c.name] || {};
+    var where = m.super === "pokemon" ? "Pokémon"
+              : m.super === "trainer" ? "Trainers"
+              : m.super === "energy" || m.energy ? "Energy"
+              : "Not read yet";
+    out[where].push(c);
+  });
+  Object.keys(out).forEach(function(k){
+    out[k].sort(function(a,b){ return (b.n||0)-(a.n||0) || String(a.name).localeCompare(String(b.name)); });
+  });
+  return out;
+}
+
+function renderDeckView(){
+  var box = $("#deckBody"); box.innerHTML = "";
+  var snap = snapshot();
+  var st = deckState();
+  if(!st){
+    box.appendChild(el("div","card",
+      "Nothing read yet. Connect the repository on the Send screen, then open this with a signal once."));
+    return;
+  }
+  if(snap && Date.now() - snap.at > 36e5){
+    var warn = el("div","stale","Showing what was read on " + fmtWhen(snap.at) +
+      ". Open this with a signal to refresh it.");
+    box.appendChild(warn);
+  }
+  var deck = chosenDeck();
+  if(!deck){ box.appendChild(el("div","card","No decks in the database yet.")); return; }
+
+  /* The same two summaries the computer shows: the dashboard's totals, and
+     the headline and three checks from Consistency. Both come out of
+     deck-core.js, the file the app reads them from, so the phone cannot
+     quietly report a different number. */
+  var sum = null;
+  try{ sum = MatchupDeck.summary(st, deck.id); }catch(e){ sum = null; }
+
+  if(sum){
+    var tc = el("div","card");
+    var tot = el("div","totals");
+    var cell = function(value, label, cls){
+      var d = el("div");
+      d.appendChild(el("b", cls || null, String(value)));
+      d.appendChild(el("span", null, label));
+      tot.appendChild(d);
+    };
+    var r = sum.record, n = sum.rounds;
+    var wr = n ? (r.w + 0.5*r.t) / n : null;
+    cell(n, "rounds");
+    cell(r.w, "won", "good-t");
+    cell(r.l, "lost", "bad-t");
+    cell(r.t, "tied", r.t ? "warn-t" : null);
+    cell(wr === null ? "—" : (100*wr).toFixed(0) + "%", "win rate");
+    cell(sum.games, "games");
+    tc.appendChild(tot);
+    /* The figures come from the database, so rounds still waiting on this
+       phone are not in them. Saying so beats letting the list below show two
+       rounds while the count above says one. */
+    var held = pendingRounds(deck).length;
+    if(held)
+      tc.appendChild(el("p","note", held + (held===1 ? " round" : " rounds") +
+        " on this phone " + (held===1 ? "is" : "are") + " not in these figures yet — tap Send."));
+    box.appendChild(tc);
+  }
+
+  if(sum && sum.score){
+    var hc = el("div","card");
+    var v = sum.verdict, tone = v.cls === "good" ? "good-t" : v.cls === "warn" ? "warn-t" : "bad-t";
+    var head = el("div","headline");
+    head.appendChild(el("span","idx " + tone, sum.score.index.toFixed(0)));
+    var side = el("div");
+    side.appendChild(el("span","word", v.word));
+    side.appendChild(el("span","of","out of 100"));
+    head.appendChild(side);
+    hc.appendChild(head);
+    hc.appendChild(el("p","note",
+      "Out of 10 games this deck fails to get going in about " +
+      MatchupDeck.inTen(1 - sum.score.c1) + ". " + sum.games + " games recorded" +
+      (sum.interval ? ", so the true figure is somewhere around " +
+        sum.interval[0].toFixed(0) + "–" + sum.interval[1].toFixed(0) : "") +
+      (sum.games < sum.enough ? ". Under " + sum.enough +
+        " games this still leans on the card maths." : ".")));
+    var chk = function(label, value, v2){
+      var row = el("div","chk");
+      row.appendChild(el("span","lab",label));
+      row.appendChild(el("span","val " + (MatchupDeck.tone(v2) === "good" ? "good-t"
+        : MatchupDeck.tone(v2) === "warn" ? "warn-t" : "bad-t"), value));
+      hc.appendChild(row);
+    };
+    chk("Gets going", MatchupDeck.inTen(sum.score.c1) + " in 10", sum.score.c1);
+    if(sum.score.c2 !== null)
+      chk("Same against everyone",
+          sum.score.c2 >= 0.85 ? "steady" : sum.score.c2 >= 0.7 ? "a bit swingy" : "feast or famine",
+          sum.score.c2);
+    if(sum.score.c3 !== null)
+      chk("Going second",
+          sum.score.c3 >= 0.9 ? "no real problem" : "leans on going first",
+          sum.score.c3);
+    box.appendChild(hc);
+  } else if(sum && sum.L !== null){
+    var lc = el("div","card");
+    lc.appendChild(el("p","note","No rounds with this deck yet. From the card maths alone, " +
+      MatchupDeck.inTen(sum.L) + " openings in 10 work."));
+    box.appendChild(lc);
+  } else if(sum && sum.counts.total !== 60){
+    var wc = el("div","card");
+    wc.appendChild(el("p","note", sum.counts.total + " cards in this list — the maths needs 60."));
+    box.appendChild(wc);
+  }
+
+  /* --- the plan, if an event is set ------------------------------------- */
+  var plan = null;
+  try{ plan = MatchupPlan.compute(st); }catch(e){ plan = null; }
+  if(plan && plan.daysLeft >= 0){
+    var pc = el("div","card");
+    pc.appendChild(el("h3",null,plan.event.name)).style.cssText="margin:0 0 2px;font-size:16px";
+    pc.appendChild(el("p","note",
+      (plan.daysLeft === 0 ? "Today" : plan.daysLeft + " days away") + " · " +
+      plan.done + " of " + plan.asked + " planned rounds played")).style.marginTop="0";
+    plan.picks.forEach(function(x){
+      var r = el("div","planrow");
+      r.appendChild(el("span","n",String(x.rounds)));
+      var d = el("div");
+      d.appendChild(el("b",null,x.name));
+      d.appendChild(el("span","meta",
+        (100*x.share).toFixed(1) + "% of the field · " +
+        (x.kind === "meet"
+          ? (x.rec.n ? x.rec.n + " rounds so far" : "never played")
+          : x.rec.w + "–" + x.rec.l + "–" + x.rec.t + " so far")));
+      r.appendChild(d);
+      pc.appendChild(r);
+    });
+    box.appendChild(pc);
+  }
+
+  /* --- the last ten rounds ---------------------------------------------- */
+  var waiting = pendingRounds(deck);
+  /* The order comes out of deck-core.js, the same file the app sorts its
+     match list with. Sorting on the day and the stored stamp alone is what
+     made this screen look frozen: every round played on one day carries the
+     same stamp, so the first game of the afternoon stayed at the top. */
+  var mine = MatchupDeck.newestFirst(
+    (st.matches || []).filter(function(m){
+      return !m.demo && m.myDeck === deck.id;
+    }).concat(waiting)
+  ).slice(0,10);
+  var rc = el("div","card");
+  rc.appendChild(el("h3",null,"Last 10 rounds")).style.cssText="margin:0 0 6px;font-size:16px";
+  if(!mine.length){
+    rc.appendChild(el("p","note","No rounds recorded with this deck yet."));
+  } else {
+    var w=0,l=0,t=0;
+    mine.forEach(function(m){ if(m.result==="W")w++; else if(m.result==="L")l++; else t++; });
+    var held = mine.filter(function(m){ return m.unsent; }).length;
+    rc.appendChild(el("p","note", w+"–"+l+"–"+t+" across these ten." +
+      (held ? " " + held + (held===1?" round is":" rounds are") +
+              " still on this phone — tap Send to put them in the database." : "")))
+      .style.marginTop="0";
+    mine.forEach(function(m){
+      var row = el("div","item");
+      var left = el("div");
+      left.appendChild(el("b",null,oppName(m.opp)));
+      left.appendChild(el("div","meta",
+        fmtDate(m.date) + " · " + (m.bo===3?"BO3":"BO1") +
+        (m.unsent ? " · on this phone, not sent yet" : "") +
+        (m.note ? " · " + m.note : m.comment ? " · " + m.comment : "")));
+      row.appendChild(left);
+      row.appendChild(el("span","res " + (m.result||""), m.result||"?"));
+      rc.appendChild(row);
+    });
+  }
+  box.appendChild(rc);
+
+  /* --- the sixty cards --------------------------------------------------- */
+  var cc = el("div","card");
+  var total = (deck.list||[]).reduce(function(s,c){ return s + (c.n||0); },0);
+  cc.appendChild(el("h3",null,"The list · " + total + " cards"))
+    .style.cssText="margin:0 0 4px;font-size:16px";
+  if(!total){
+    cc.appendChild(el("p","note","No card list saved for this deck yet."));
+  } else {
+    var g = groupCards(deck);
+    Object.keys(g).forEach(function(k){
+      if(!g[k].length) return;
+      var n = g[k].reduce(function(s,c){ return s + (c.n||0); },0);
+      cc.appendChild(el("div","deck-h", k + " · " + n));
+      g[k].forEach(function(c){
+        var r = el("div","cardrow");
+        r.appendChild(el("span","n",String(c.n)));
+        var nm = el("span",null,c.name);
+        if(c.set) nm.appendChild(el("span","set"," " + c.set + (c.number ? " " + c.number : "")));
+        r.appendChild(nm);
+        cc.appendChild(r);
+      });
+    });
+  }
+  box.appendChild(cc);
+}
+
+function oppName(id){
+  var st = deckState();
+  var e = (((st||{}).config||{}).meta||{}).entries || [];
+  for(var i=0;i<e.length;i++) if(e[i].id === id) return e[i].name;
+  return String(id||"unknown");
+}
+
+function fillDeckPicker(){
+  var st = deckState(), sel = $("#deckview");
+  var ds = ((st||{}).config||{}).decks || [];
+  ds = ds.filter(function(d){ return d && d.id && !d.archived; });
+  var keep = sel.value;
+  sel.innerHTML = "";
+  ds.forEach(function(d){
+    var o = document.createElement("option");
+    o.value = d.id; o.textContent = d.name || d.id;
+    sel.appendChild(o);
+  });
+  sel.value = keep && ds.some(function(d){ return d.id===keep; })
+    ? keep : ((st||{}).config||{}).active || (ds[0]||{}).id || "";
+  sel.disabled = ds.length < 2;
+}
+
+/* Network first, cache second: the newest database when there is a signal,
+   the last one read when there is not. */
+function refreshDeckView(){
+  var c = cfg(), msg = $("#deckMsg");
+  renderDeckView();
+  fillDeckPicker();
+  if(!c.repo || !c.token){
+    msg.textContent = "Connect the repository on the Send screen to read your deck here.";
+    msg.className = "note";
+    return;
+  }
+  msg.textContent = "Reading…"; msg.className = "note";
+  var transport = function(method, url, body){
+    /* no-store: GitHub's contents endpoint is cacheable, and a phone that
+       answered from its own cache would show yesterday's database while
+       saying it had just read it. */
+    return fetch(url, { method: method, cache: "no-store",
+      headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
+                 "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){ return r.text().then(function(t){
+      var j=null; try{ j=JSON.parse(t); }catch(e){}
+      return { status: r.status, json: j }; }); });
+  };
+  var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
+                                      branch: c.branch || "main" }, transport);
+  store.pull().then(function(remote){
+    if(!remote){ msg.textContent = "No " + (c.path||"data.json") + " in " + c.repo + " yet."; msg.className="note bad"; return; }
+    keepSnapshot(remote);
+    fillDeckPicker();
+    renderDeckView();
+    msg.textContent = "Read just now.";
+    msg.className = "note ok";
+  }).catch(function(e){
+    var snap = snapshot();
+    msg.textContent = snap
+      ? "No connection — showing what was read on " + fmtWhen(snap.at) + "."
+      : "Could not read the database: " + (e && e.message ? e.message : e);
+    msg.className = "note " + (snap ? "" : "bad");
+  });
+}
+
+$("#deckview").onchange = renderDeckView;
+
+$("#tabdeck").onclick = function(){
+  var deckOn = $("#screen-deck").classList.contains("hidden");
+  $("#screen-deck").classList.toggle("hidden", !deckOn);
+  $("#screen-log").classList.toggle("hidden", deckOn);
+  $("#screen-sync").classList.add("hidden");
+  $("#save").style.display = deckOn ? "none" : "";
+  $("#tabsync").style.display = deckOn ? "none" : "";
+  this.textContent = deckOn ? "Back" : "Deck";
+  if(deckOn) refreshDeckView();
+  window.scrollTo(0,0);
+};
+
+
+$("#forget").onclick = function(){
+  var c = cfg();
+  if(!c.repo && !c.token){ alert("No repository or token is saved on this phone."); return; }
+  if(!confirm("Remove the saved repository and token from this phone?\n\nRecorded rounds are kept. " +
+    "The copy of your database kept for the Deck screen goes too. " +
+    "Revoke the token on GitHub as well if the phone may be out of your hands.")) return;
+  try{ localStorage.removeItem(CFG); }catch(e){}
+  /* The deck view's copy of the database goes with the token: whoever can no
+     longer reach the repository should not still be holding a read of it. */
+  try{ localStorage.removeItem(SNAP); }catch(e){}
+  $("#repo").value = ""; $("#token").value = "";
+  renderSyncState();
+  if($("#deckBody")) renderDeckView();
+  $("#syncMsg").textContent = "Repository, token and the saved copy of the database removed from this phone.";
+};
+
+fillSelects(); fillDecks(); renderGames(); refresh();
+pullDecks(true);
+
+/* A button, not an option in the list: picking the option you are already on
+   fires no change event, so the first deck could never be typed. */
+$("#newdeck").onclick = function(){ askDeckName(); };
+
+$("#mydeck").onchange = function(){
+  var v = this.value;
+  if (!v) return;
+  if (v.indexOf("id:") === 0) {
+    var id = v.slice(3), hit = knownDecks().filter(function(d){ return d.id === id; })[0];
+    rememberDeck(id, hit ? hit.name : id);
+  } else {
+    rememberDeck("", v.slice(3));
+  }
+  showDeckNote();
+  fillVersions();
+};
+
+$("#version").onchange = function(){
+  var c = cfg(), by = c.versionBy || {};
+  if (c.deckId) { by[c.deckId] = this.value; c.versionBy = by; setCfg(c); }
+  showVersionNote();
+};
+
+/* Served over https (or on localhost) the logger installs as a real offline app:
+   add it to the Home Screen once and it opens with no signal at the venue. */
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").catch(function () { /* fine without it */ });
+  });
+}
+</script>
+</body>
+</html>

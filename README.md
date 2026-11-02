@@ -5,14 +5,13 @@ app on iOS: those apps show the page in their own preview, and Safari does not
 open `file://` addresses. The page has to be served over **https** once. After
 that it is installed on the phone and works with no signal.
 
-## Publish it (about five minutes, on the Mac)
+## Publish it (about five minutes, in a browser)
 
 1. On github.com create a **new public repository** called `matchup-logger`.
    Public is fine: these files hold no personal data and no token. The token you
    type into the logger stays in your phone's browser and is never part of the page.
-2. Open the repository, choose **Add file → Upload files**, and drag in every
-   file from this folder: `index.html`, `sw.js`, `manifest.webmanifest`,
-   `icon-180.png`, `icon-512.png`, `viewer.html`. Commit.
+2. Open the repository, choose **Add file → Upload files**, and drag in
+   **everything in this folder** — not a chosen few. Commit.
 3. Go to **Settings → Pages**. Under *Build and deployment*, set Source to
    **Deploy from a branch**, branch **main**, folder **/ (root)**. Save.
 4. Wait a minute, then reload the Pages settings page. It shows the address:
@@ -58,9 +57,14 @@ stays in its own private repository. Never turn Pages on for that one.
 
 ## Updating it later
 
-Upload the new `index.html` — and `viewer.html`, if you use it — to the same
-repository. The phone picks the new version up the next time it opens with a
-signal. Recorded rounds are kept.
+Same thing: **Add file → Upload files**, drag in everything in this folder again,
+commit. GitHub replaces the files that already exist. The phone picks the new
+version up the next time it opens with a signal, and recorded rounds are kept.
+
+Drag in the whole folder rather than picking files. `viewer.html` is the one
+that gets forgotten, and when it does the iPad goes on reading an older version
+of the app while the phone is already up to date — with nothing on either screen
+to say so.
 
 The logger prints its version at the bottom of the Send screen. If it does not
 match the version of the app on the computer, the upload did not happen.

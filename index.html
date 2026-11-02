@@ -171,7 +171,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       <p class="note">Use the last one before lending the phone to anyone, or if you stop using sync. It removes the saved token from this phone; it does not revoke it on GitHub.</p>
     </details>
   </div>
-  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-10-29 v2.19.0</p>
+  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-11-02 v2.24.1</p>
 </div>
 
 <div id="screen-deck" class="hidden">
@@ -452,9 +452,28 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     return { week: (recent.length / span) * 7, rounds: recent.length };
   }
 
+  /* Archetypes the player has told the app to count as one. The computer
+     keeps the map; this file only reads it, so the phone and the app plan
+     against the same field. */
+  function familyOf(state, id) {
+    var map = (state.config || {}).families || {};
+    var at = id;
+    for (var i = 0; i < 8 && map[at] && map[at] !== at; i++) at = map[at];
+    return at;
+  }
+
   function fieldRows(state) {
-    return (((state.config || {}).meta || {}).entries || []).filter(function (e) {
+    var all = (((state.config || {}).meta || {}).entries || []).filter(function (e) {
       return e.id && e.id !== "other";
+    });
+    /* A parent stands for its children and carries their share with it. */
+    return all.filter(function (e) {
+      return familyOf(state, e.id) === e.id;
+    }).map(function (e) {
+      var share = all.reduce(function (s, x) {
+        return s + (familyOf(state, x.id) === e.id ? x.share || 0 : 0);
+      }, 0);
+      return Object.assign({}, e, { share: share });
     });
   }
 
@@ -465,7 +484,8 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     var target = parseFloat((state.config || {}).target) || 0.55;
     var byOpp = {};
     rounds.forEach(function (m) {
-      var r = (byOpp[m.opp] = byOpp[m.opp] || { n: 0, w: 0, l: 0, t: 0 });
+      var opp = familyOf(state, m.opp);
+      var r = (byOpp[opp] = byOpp[opp] || { n: 0, w: 0, l: 0, t: 0 });
       r.n++;
       if (m.result === "W") r.w++;
       else if (m.result === "L") r.l++;
@@ -556,7 +576,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
 
     var met = {};
     rounds.forEach(function (m) {
-      met[m.opp] = 1;
+      met[familyOf(state, m.opp)] = 1;
     });
     var covered = 0;
     fieldRows(state).forEach(function (row) {
@@ -588,7 +608,8 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     };
   }
 
-  var api = { compute: compute, planEvent: planEvent, asDate: asDate, LOCK_DAYS: LOCK_DAYS };
+  var api = { compute: compute, planEvent: planEvent, asDate: asDate, LOCK_DAYS: LOCK_DAYS,
+              familyOf: familyOf };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MatchupPlan = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
@@ -788,6 +809,51 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
      pasted into the app does not, because the export format does not say.
      So energy is recognised by name as well, and where the group is unknown
      both marks are offered rather than guessing the card is a Trainer. */
+  /* ---- one card, however it was written down -----------------------------
+     The same card arrives spelled three ways depending on where the list was
+     copied from. "Poké Pad" and "Poke Pad" are one card; so are "Basic {D}
+     Energy", "Darkness Energy - Basic" and "Basic Darkness Energy"; so are
+     "Hero's Cape" and "Hero's Cape - ACESPEC". Counted as different cards
+     they wreck everything downstream: a comparison of two versions reports
+     eleven changes where one card was swapped, the card marks do not carry
+     across a re-paste, and two halves of one count never add up.
+
+     So every comparison goes through this key. It is deliberately narrow:
+     accents, apostrophes, punctuation and the ACE SPEC tag are noise, and
+     basic energy has a handful of known spellings. Anything else is left
+     alone - two cards that really are different must never collapse into
+     one, which is the failure nobody would notice. */
+  var ENERGY_SYMBOL = {
+    g: "grass", r: "fire", w: "water", l: "lightning", p: "psychic",
+    f: "fighting", d: "darkness", m: "metal", y: "fairy", n: "dragon", c: "colorless",
+  };
+  var ENERGY_NAMED = "grass|fire|water|lightning|psychic|fighting|darkness|metal|fairy|dragon|colorless";
+
+  function cardKey(name) {
+    var s = String(name == null ? "" : name);
+    /* é → e, and the curly apostrophe a copied list brings with it. */
+    s = s.normalize ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : s;
+    s = s.replace(/[\u2018\u2019\u02bc\u00b4]/g, "'").toLowerCase().trim();
+    /* A tag saying what kind of card it is, not which card it is. */
+    s = s.replace(/\s*[-–—]\s*ace\s?spec\s*$/, "").replace(/\s*\(\s*ace\s?spec\s*\)\s*$/, "");
+    /* Basic energy, in every spelling the exports use. */
+    var sym = s.match(/^basic\s*\{?([grwlpfdmync])\}?\s*energy$/);
+    if (sym) return "energy:" + ENERGY_SYMBOL[sym[1]];
+    var named = s.replace(/\s*[-–—]\s*basic\s*$/, "")
+      .match(new RegExp("^(?:basic\\s+)?(" + ENERGY_NAMED + ")\\s+energy$"));
+    if (named) return "energy:" + named[1];
+    return s.replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  /* The spelling to show when several were found for one card: the longest
+     one, which is the one carrying the most information, and among equals
+     the first seen. A made-up canonical name would be a fourth spelling. */
+  function bestName(names) {
+    return (names || []).filter(Boolean).sort(function (a, b) {
+      return b.length - a.length || String(a).localeCompare(String(b));
+    })[0] || "";
+  }
+
   function isEnergy(c) {
     return c.group === "energy" || /\bEnergy$/i.test(c.name || "");
   }
@@ -796,8 +862,21 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     return !isEnergy(c) && (!c.group || c.group === "pokemon");
   }
 
+  /* What is known about a card, found by the card rather than by the
+     spelling it was stored under. A list re-pasted from another site comes
+     back with "Poke Pad" where the marks were saved against "Poké Pad", and
+     every tick for it would otherwise be lost. */
+  function markFor(d, name) {
+    var marks = d.cardClass || {};
+    if (marks[name]) return marks[name];
+    var want = cardKey(name);
+    var keys = Object.keys(marks);
+    for (var i = 0; i < keys.length; i++) if (cardKey(keys[i]) === want) return marks[keys[i]];
+    return null;
+  }
+
   function marksOf(d, c) {
-    var m = (d.cardClass || {})[c.name] || {};
+    var m = markFor(d, c.name) || {};
     var energy = isEnergy(c) || m.energy === true;
     /* An older mark said only "engine"; treat it as search unless the card
        looks like draw, so nothing ticked before this split is lost. */
@@ -990,6 +1069,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     isEnergy: isEnergy, marksOf: marksOf, classesOf: classesOf,
     couldBeBasic: couldBeBasic,
     normalName: normalName, deckByName: deckByName,
+    cardKey: cardKey, bestName: bestName, markFor: markFor,
     withNamedRoundsAdopted: withNamedRoundsAdopted,
     tone: tone, inTen: inTen, verdict: verdict, turnGap: turnGap,
     summary: summary,
@@ -1346,6 +1426,45 @@ function uid(){
     Math.random().toString(36).slice(2,10);
 }
 
+/* The same round, saved twice.
+ *
+ * It happened at a Regional: the same opponent, the same three games, two
+ * entries minutes apart. On a phone between rounds it is an easy slip - the
+ * button is large, the hall is loud, and nothing on screen says the round
+ * already went in. Once it has been sent there is no undoing it from here,
+ * so the only place to catch it is before it is saved.
+ *
+ * The test is deliberately narrow: the same deck, the same opponent, the
+ * same format and the same results in the same order, within the last few
+ * minutes. Two real rounds against one archetype in one afternoon are
+ * perfectly normal, but two with an identical game-by-game line inside a
+ * quarter of an hour are nearly always one round entered twice. And it
+ * asks rather than refuses: the player knows which it was.
+ */
+var SAME_WITHIN = 15 * 60 * 1000;
+
+function sameAs(row, prior){
+  if(prior.opp !== row.opp || prior.bo !== row.bo) return false;
+  if((prior.deckId || "") !== (row.deckId || "")) return false;
+  if((prior.deckName || "") !== (row.deckName || "")) return false;
+  var a = prior.games || [], b = row.games || [];
+  if(a.length !== b.length) return false;
+  for(var i=0;i<a.length;i++){
+    if(a[i].r !== b[i].r) return false;
+    if((a[i].first === undefined ? null : a[i].first) !==
+       (b[i].first === undefined ? null : b[i].first)) return false;
+  }
+  return true;
+}
+
+function alreadySaved(row){
+  var now = Date.now();
+  var hit = load().filter(function(r){
+    return now - (r.ts || 0) < SAME_WITHIN && sameAs(row, r);
+  }).sort(function(a,b){ return (b.ts||0)-(a.ts||0); })[0];
+  return hit || null;
+}
+
 $("#save").onclick = function(){
   var n = draft.bo === 1 ? 1 : 3;
   var games = draft.games.slice(0,n).filter(function(g){ return g.r; });
@@ -1377,6 +1496,14 @@ $("#save").onclick = function(){
     fromPhone: true
   };
   row.result = seriesResult(row.games);
+  var twin = alreadySaved(row);
+  if(twin){
+    var mins = Math.max(1, Math.round((Date.now() - (twin.ts || 0)) / 60000));
+    if(!confirm("You already saved this round " + mins + " minute" + (mins===1?"":"s") +
+       " ago:\n\n" + labelFor(row.opp) + " — " + row.result + " (" +
+       row.games.map(function(g){ return g.r; }).join("·") + ")\n\n" +
+       "Save it a second time?")) return;
+  }
   var rows = load(); rows.push(row); save(rows);
   setCfg(Object.assign(cfg(), { event: row.event, bo: draft.bo }));
   draft = { bo: draft.bo, games:[{},{},{}] };
@@ -1508,7 +1635,11 @@ function sendNow(){
       var all = load();
       all.forEach(function(r){ if(!r.sent && pending.some(function(p){ return p.id===r.id; })) r.sent = true; });
       save(all);
-      c.lastSync = Date.now(); setCfg(c);
+      /* `c` was read before the network call. Writing it back whole would
+         undo anything saved while the send was in flight - the deck picked,
+         the version chosen, the event of a round logged meanwhile. Only the
+         one field this knows about is merged into whatever is there now. */
+      setCfg(Object.assign(cfg(), { lastSync: Date.now() }));
       msg.textContent = "Sent " + pending.length + " round" + (pending.length===1?"":"s") + ".";
       msg.className = "note ok";
       refresh(); renderSyncState();
@@ -1622,6 +1753,8 @@ function pullDecks(quiet){
         "from the computer first.", "note bad");
       return;
     }
+    /* Read again here, not at the top: this runs after a network call, and
+       the deck or the version may have been chosen while it was waiting. */
     var cc = cfg();
     var typed = (Array.isArray(cc.decks) ? cc.decks : []).filter(function(d){ return !d.id; });
     cc.decks = decks.concat(typed);

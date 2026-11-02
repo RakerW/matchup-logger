@@ -100,6 +100,7 @@ textarea{min-height:66px;resize:vertical}
 .chk:last-child{border-bottom:0}
 .chk .lab{font-size:13px;color:var(--muted)}
 .chk .val{font-weight:700;font-size:15px}
+.thin-t{opacity:.55}
 .good-t{color:var(--win)} .warn-t{color:var(--tie)} .bad-t{color:var(--loss)}
 .count{background:var(--accent);border-radius:999px;padding:1px 8px;font-size:12px;margin-left:6px}
 details summary{min-height:var(--tap);display:flex;align-items:center;cursor:pointer;color:var(--muted);font-size:14px}
@@ -171,7 +172,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       <p class="note">Use the last one before lending the phone to anyone, or if you stop using sync. It removes the saved token from this phone; it does not revoke it on GitHub.</p>
     </details>
   </div>
-  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-11-02 v2.24.1</p>
+  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-11-02 v2.25.0</p>
 </div>
 
 <div id="screen-deck" class="hidden">
@@ -291,13 +292,12 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     var out = {
       schemaVersion: 2,
       config: mergeConfigs(a.config, b.config, matches, drills, trash, decks,
-                           num(a._updatedAt) >= num(b._updatedAt) ? a.config : b.config),
+                           configStamp(a) >= configStamp(b) ? a.config : b.config),
       matches: matches,
       drills: drills,
       trash: trash,
       _updatedAt: Math.max(num(a._updatedAt), num(b._updatedAt)),
-      _configUpdatedAt: Math.max(num(a._configUpdatedAt) || num(a._updatedAt),
-                                 num(b._configUpdatedAt) || num(b._updatedAt)),
+      _configUpdatedAt: Math.max(configStamp(a), configStamp(b)),
       _tombstones: tombs
     };
 
@@ -322,6 +322,18 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   }
 
   function isEmpty(o) { return !o || Object.keys(o).length === 0; }
+
+  /* When this side's config was last changed. A device that carries no config
+     of its own - this page publishes `config: {}` - must not lend its own save
+     time to this figure. It used to, and then one round published from the
+     phone made the pulled, older config look like the newest one and reverted
+     every setting on the computer. */
+  function configStamp(s) {
+    if (!s) return 0;
+    var own = num(s._configUpdatedAt);
+    if (own) return own;
+    return isEmpty(s.config) ? 0 : num(s._updatedAt);
+  }
 
   function mergeConfigs(ca, cb, matches, drills, trash, decks, newest) {
     var merged = Object.assign({}, isEmpty(newest) ? (isEmpty(ca) ? cb : ca) : newest);
@@ -411,8 +423,16 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   function asDate(s) {
     var p = String(s || "").split("-");
     if (p.length !== 3) return null;
-    var d = new Date(+p[0], +p[1] - 1, +p[2]);
-    return isNaN(d.getTime()) ? null : d;
+    var y = +p[0], mo = +p[1], da = +p[2];
+    if (!isFinite(y) || !isFinite(mo) || !isFinite(da)) return null;
+    /* A typed "2026-13-99" used to roll over into April 2027 and then sat
+       inside the pace window and the plan's date tests as a real date eight
+       months away. A date that is not a date is nothing. */
+    if (mo < 1 || mo > 12 || da < 1 || da > 31) return null;
+    var d = new Date(y, mo - 1, da);
+    if (isNaN(d.getTime())) return null;
+    if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== da) return null;
+    return d;
   }
 
   function daysBetween(a, b) {
@@ -425,19 +445,26 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     return e;
   }
 
+  /* Every round with this deck. A round whose date could not be read is
+     still a round: dropping it here gave the same opponent two different
+     records on two pages of the same app. Only the parts that genuinely need
+     a date - the pace, the progress window - skip it, and they say so. */
   function roundsOf(state, deckId) {
     return (state.matches || []).filter(function (m) {
-      return !m.demo && m.myDeck === deckId && asDate(m.date);
+      return !m.demo && m.myDeck === deckId;
     });
   }
 
   /* How many rounds actually get recorded in a week. Measured, not asked
      for: a plan built on wishes is a list of things that will not happen. */
   function pace(rounds, now) {
-    if (!rounds.length) return { week: 0, rounds: 0 };
+    /* This is the one figure that genuinely needs a date, so a round whose
+       date cannot be read is left out of it - and only of it. */
     var days = rounds.map(function (m) {
-      return asDate(m.date).getTime();
-    });
+      var d = asDate(m.date);
+      return d ? d.getTime() : null;
+    }).filter(function (t) { return t !== null; });
+    if (!days.length) return { week: 0, rounds: 0 };
     var last = Math.max.apply(null, days),
       first = Math.min.apply(null, days);
     /* Only the last six weeks count, and the window runs to today rather
@@ -457,14 +484,33 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
      against the same field. */
   function familyOf(state, id) {
     var map = (state.config || {}).families || {};
-    var at = id;
-    for (var i = 0; i < 8 && map[at] && map[at] !== at; i++) at = map[at];
+    var at = id, seen = {};
+    seen[at] = 1;
+    for (var i = 0; i < 8 && map[at] && map[at] !== at; i++) {
+      var next = map[at];
+      /* Two computers can each name the other's archetype as the parent, and
+         then the map loops. Walking it to an arbitrary hop left no archetype
+         as its own parent, so the field came out empty and the plan page went
+         blank with no explanation. A loop means no family. */
+      if (seen[next]) return id;
+      seen[next] = 1;
+      at = next;
+    }
     return at;
   }
 
   function fieldRows(state) {
-    var all = (((state.config || {}).meta || {}).entries || []).filter(function (e) {
-      return e.id && e.id !== "other";
+    var raw = (((state.config || {}).meta || {}).entries || []).filter(function (e) {
+      return e && e.id && e.id !== "other";
+    });
+    /* A metagame list that names one archetype twice used to produce two
+       identical rows, each carrying the doubled share, and coverage past
+       100%. The first mention wins. */
+    var seen = {}, all = [];
+    raw.forEach(function (e) {
+      if (seen[e.id]) return;
+      seen[e.id] = 1;
+      all.push(e);
     });
     /* A parent stands for its children and carries their share with it. */
     return all.filter(function (e) {
@@ -537,7 +583,11 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     var p = pace(rounds, now);
     var weeksLeft = Math.max(0, left / 7);
     var capacity = Math.max(0, Math.round(p.week * weeksLeft * (1 - RESERVE)));
-    var lock = asDate(e.lockDate) || new Date(day.getTime() - LOCK_DAYS * 86400000);
+    /* Calendar days, not milliseconds: subtracting 86400000 across the spring
+       clock change landed an hour early and told the player the list was
+       locked a full day before it was. */
+    var lock = asDate(e.lockDate) ||
+      new Date(day.getFullYear(), day.getMonth(), day.getDate() - LOCK_DAYS);
 
     var t = targets(state, rounds);
     var picks = [],
@@ -569,9 +619,15 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     /* Progress is read off the match log. A plan with boxes to tick by hand
        goes stale the first time someone forgets; this one cannot. */
     var since = e.setAt ? midnight(new Date(e.setAt)) : now;
+    /* Only rounds against something the plan actually asked for. Counting
+       every round with the deck printed "40 of 3 planned rounds played",
+       because a round against an archetype nobody planned ticked a box. */
+    var planned = {};
+    picks.forEach(function (x) { planned[x.id] = 1; });
     var done = rounds.filter(function (m) {
       var d = asDate(m.date);
-      return d >= since && d <= day;
+      if (!d || d < since || d > day) return false;
+      return !!planned[familyOf(state, m.opp)];
     }).length;
 
     var met = {};
@@ -599,7 +655,13 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       lock: lock,
       lockPassed: now > lock,
       listChangedAfterLock: (deck.versions || []).some(function (v) {
-        return v.createdAt && new Date(v.createdAt) > lock && new Date(v.createdAt) <= day;
+        if (!v.createdAt) return false;
+        var at = new Date(v.createdAt);
+        /* The upper bound is the end of the event day. It used to be midnight
+           at the start of it, so a list changed on the morning of the event -
+           the one change most worth a warning - was the one it missed. */
+        var endOfDay = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+        return at > lock && at < endOfDay;
       }),
       picks: picks,
       coverage: covered,
@@ -739,18 +801,39 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     };
   }
 
+  /* A tie is half a win. The app says so in its own method note, and
+     stats() on the screens counts it that way - but these three checks
+     counted it as a defeat, so one drawn game meant three different things
+     in three places. Ties are not rare: a timed best-of-three produces
+     them regularly. */
+  function wonShare(games) {
+    if (!games.length) return null;
+    var score = 0;
+    games.forEach(function (g) { score += g.r === "W" ? 1 : g.r === "T" ? 0.5 : 0; });
+    return score / games.length;
+  }
+
   /* C2 — even across the field, or feast and famine? Pearson dispersion
      against a single true rate, pulled towards 1 while the sample is thin. */
   function spread(games) {
     var by = {};
-    games.forEach(function (g) { (by[g.opp] = by[g.opp] || []).push(g.r === "W" ? 1 : 0); });
+    games.forEach(function (g) {
+      (by[g.opp] = by[g.opp] || []).push(g.r === "W" ? 1 : g.r === "T" ? 0.5 : 0);
+    });
     var groups = Object.keys(by).map(function (k) { return by[k]; })
       .filter(function (v) { return v.length >= 2; });
     if (groups.length < 3) return null;
     var wins = 0, n = 0;
     groups.forEach(function (v) { v.forEach(function (x) { wins += x; n++; }); });
     var p = wins / n;
-    if (p <= 0 || p >= 1) return 1;
+    /* Every game won, or every game lost. There is no dispersion to measure
+       against a rate of 0 or 1 - the formula divides by p(1-p) - and the
+       answer is not "perfectly even", it is "nothing to say". Returning the
+       top of the scale said the opposite: a deck that had lost every game
+       on record was reported as "the same against everyone", and because
+       the verdict takes the weakest of the three checks, a check pinned at
+       1 can never pull it down. */
+    if (p <= 0 || p >= 1) return null;
     var chi = 0;
     groups.forEach(function (v) {
       var k = v.reduce(function (a, b) { return a + b; }, 0);
@@ -766,10 +849,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     var f = games.filter(function (g) { return g.first === true; });
     var s = games.filter(function (g) { return g.first === false; });
     if (f.length < 3 || s.length < 3) return null;
-    var wr = function (a) {
-      return a.filter(function (g) { return g.r === "W"; }).length / a.length;
-    };
-    var raw = wr(f) - wr(s);
+    var raw = wonShare(f) - wonShare(s);
     var k = (f.length + s.length) / (f.length + s.length + 12);
     var gap = k * raw + (1 - k) * POOLED_TURN_GAP;
     return Math.max(0.3, 1 - Math.max(0, gap - POOLED_TURN_GAP) / 0.35);
@@ -942,10 +1022,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     var f = games.filter(function (g) { return g.first === true; });
     var s2 = games.filter(function (g) { return g.first === false; });
     if (f.length < 3 || s2.length < 3) return null;
-    var wr = function (a) {
-      return a.filter(function (g) { return g.r === "W"; }).length / a.length;
-    };
-    return wr(f) - wr(s2);
+    return wonShare(f) - wonShare(s2);
   }
 
   /* A round recorded on the phone carries the deck's NAME, because the phone
@@ -1044,15 +1121,27 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   }
 
   function newestFirst(matches) {
-    var rows = (matches || []).map(function (m, i) { return { m: m, i: i }; });
+    /* The sort key has to be the same kind of thing for every round, or the
+       comparison is not an order at all. The first attempt compared some
+       pairs by their moment and others by their position, which is
+       intransitive: three rounds on one day, one of them legacy, came back
+       in four different orders depending on the order they went in, and
+       sorting an already sorted list reversed it. The "last ten rounds"
+       figure was then computed over the wrong ten.
+    
+       So one key per round: the moment it was entered where that is known,
+       and otherwise the stamp it has, which is noon of the day it was
+       played. A round entered at twenty past three therefore sits above the
+       rounds of that day that never recorded an hour, and those keep their
+       order in the file, where the later entry is the later round. */
+    var rows = (matches || []).map(function (m, i) {
+      var moment = entryMoment(m);
+      return { m: m, i: i, at: moment === null ? (typeof m.ts === "number" ? m.ts : 0) : moment };
+    });
     rows.sort(function (a, b) {
       var byDay = String(b.m.date || "").localeCompare(String(a.m.date || ""));
       if (byDay) return byDay;
-      var am = entryMoment(a.m), bm = entryMoment(b.m);
-      /* A round with a real moment is placed by it; one without is left to
-         its position, and the two are not compared against each other on a
-         number only one of them has. */
-      if (am !== null && bm !== null && am !== bm) return bm - am;
+      if (a.at !== b.at) return b.at - a.at;
       return b.i - a.i;
     });
     return rows.map(function (x) { return x.m; });
@@ -1069,7 +1158,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     isEnergy: isEnergy, marksOf: marksOf, classesOf: classesOf,
     couldBeBasic: couldBeBasic,
     normalName: normalName, deckByName: deckByName,
-    cardKey: cardKey, bestName: bestName, markFor: markFor,
+    cardKey: cardKey, bestName: bestName, markFor: markFor, wonShare: wonShare,
     withNamedRoundsAdopted: withNamedRoundsAdopted,
     tone: tone, inTen: inTen, verdict: verdict, turnGap: turnGap,
     summary: summary,
@@ -1137,9 +1226,36 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       }
       if (r.status < 200 || r.status >= 300) throw httpError(r);
       self.sha = r.json && r.json.sha;
-      var text = b64decodeUtf8((r.json && r.json.content) || "");
+      var size = (r.json && r.json.size) || 0;
+      var encoding = r.json && r.json.encoding;
+      var raw = (r.json && r.json.content) || "";
+      /* Over about 1 MB GitHub answers with `encoding: "none"` and an empty
+         `content`. Decoding that gives "", which used to be read as "there is
+         no file yet" - and then the merge had nothing to merge with and the
+         push, holding a valid sha, replaced the whole database with whatever
+         this device happened to be carrying. Ask for the raw body instead. */
+      if (encoding === "none" || (size > 0 && !raw)) {
+        return self.transport("GET", self._readUrl(), null, "application/vnd.github.raw+json")
+          .then(function (r2) {
+            if (r2.status < 200 || r2.status >= 300) throw httpError(r2);
+            var body = r2.json;
+            if (body === null || body === undefined) {
+              if (typeof r2.text === "string" && r2.text.trim()) body = JSON.parse(r2.text);
+            }
+            if (body === null || body === undefined || typeof body !== "object") {
+              /* Still unreadable. Never report this as "no file": that is the
+                 one answer that lets a push wipe the others out. */
+              throw new Error("the database in the repository is too large to read through this connection");
+            }
+            self.lastPull = Date.now(); self.message = "";
+            return body;
+          });
+      }
+      var text = b64decodeUtf8(raw);
       self.lastPull = Date.now(); self.message = "";
-      return text.trim() ? JSON.parse(text) : null;
+      if (text.trim()) return JSON.parse(text);
+      if (size > 0) throw new Error("the database in the repository could not be read");
+      return null;
     });
   };
 
@@ -1215,8 +1331,15 @@ function $(s){ return document.querySelector(s); }
 function el(tag, cls, text){ var e=document.createElement(tag); if(cls) e.className=cls;
   if(text!=null) e.textContent=text; return e; }
 function load(){ try{ return JSON.parse(localStorage.getItem(LS)) || []; }catch(e){ return []; } }
-function save(rows){ try{ localStorage.setItem(LS, JSON.stringify(rows)); }catch(e){
-  alert("This phone refused to store the round. Free some space and try again."); } }
+function localDay(d){ var t = d || new Date();
+  var p = function(n){ return (n<10?"0":"") + n; };
+  return t.getFullYear() + "-" + p(t.getMonth()+1) + "-" + p(t.getDate()); }
+/* Returns whether the write landed. The caller has to ask: this used to
+   swallow a full-storage error, and the form was then cleared and the screen
+   said "Saved" over a round that had never been written down anywhere. */
+function save(rows){ try{ localStorage.setItem(LS, JSON.stringify(rows)); return true; }catch(e){
+  alert("This phone refused to store the round - its storage is full. Nothing was cleared, so write the round down or free some space and save again.");
+  return false; } }
 function cfg(){ try{ return JSON.parse(localStorage.getItem(CFG)) || {}; }catch(e){ return {}; } }
 function setCfg(c){ try{ localStorage.setItem(CFG, JSON.stringify(c)); }catch(e){} }
 
@@ -1491,7 +1614,10 @@ $("#save").onclick = function(){
     event: $("#event").value,
     note: $("#note").value.trim(),
     comment: $("#comment").value.trim(),
-    date: new Date().toISOString().slice(0,10),
+    /* The local day, the way the computer writes it. toISOString gives the
+       UTC day, so a round at half past midnight was dated yesterday and then
+       sorted below the whole previous evening. */
+    date: localDay(),
     ts: Date.now(),
     fromPhone: true
   };
@@ -1504,7 +1630,9 @@ $("#save").onclick = function(){
        row.games.map(function(g){ return g.r; }).join("·") + ")\n\n" +
        "Save it a second time?")) return;
   }
-  var rows = load(); rows.push(row); save(rows);
+  var rows = load(); rows.push(row);
+  /* Only clear the form once the round is really on the phone. */
+  if(!save(rows)) return;
   setCfg(Object.assign(cfg(), { event: row.event, bo: draft.bo }));
   draft = { bo: draft.bo, games:[{},{},{}] };
   $("#note").value = "";
@@ -1582,7 +1710,14 @@ function phoneRowsAsState(rows, deckId){
     config: {}, drills: [], trash: [],
     matches: rows.map(function(r){
       var m = JSON.parse(JSON.stringify(r));
-      m.myDeck = r.deckId || deckId || "__phone__";
+      /* The deck this round was recorded under - never the one picked in the
+         Deck screen now. Rounds typed at a venue under a name, before the
+         deck list had been read, used to be filed under whatever deck
+         happened to be selected a week later when Send was tapped, and
+         because that was a real deck id the computer's name rule skipped
+         them: silently and permanently under the wrong deck. Empty means
+         "match it by the name" - which is what deckName is for. */
+      m.myDeck = r.deckId || "__phone__";
       if (r.deckName) m.deckName = r.deckName;
       delete m.sent;
       return m;
@@ -1611,12 +1746,13 @@ function sendNow(){
   var rows = load(), pending = rows.filter(function(r){ return !r.sent; });
   if(!pending.length){ msg.textContent = "Nothing new to send."; return; }
   msg.textContent = "Sending…"; msg.className = "note";
-  var transport = function(method, url, body){
+  var transport = function(method, url, body, accept){
     return fetch(url, {
       method: method,
+      cache: "no-store",
       headers: {
         "Authorization": "Bearer " + c.token,
-        "Accept": "application/vnd.github+json",
+        "Accept": accept || "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "Content-Type": "application/json"
       },
@@ -1624,7 +1760,7 @@ function sendNow(){
     }).then(function(r){
       return r.text().then(function(t){
         var j = null; try{ j = JSON.parse(t); }catch(e){}
-        return { status: r.status, json: j };
+        return { status: r.status, json: j, text: t };
       });
     });
   };
@@ -1720,17 +1856,17 @@ function pullDecks(quiet){
   var btn = $("#loaddecks"); btn.disabled = true;
   var say = function(text, cls){ if(quiet) return; msg.textContent = text; if(cls) msg.className = cls; };
   if(!quiet) msg.textContent = "Reading the deck list…";
-  var transport = function(method, url, body){
+  var transport = function(method, url, body, accept){
     /* no-store: GitHub's contents endpoint is cacheable, and a phone that
        answered from its own cache would show yesterday's database while
        saying it had just read it. */
     return fetch(url, { method: method, cache: "no-store",
-      headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
+      headers: { "Authorization": "Bearer " + c.token, "Accept": accept || "application/vnd.github+json",
                  "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined
     }).then(function(r){ return r.text().then(function(t){
       var j=null; try{ j=JSON.parse(t); }catch(e){}
-      return { status: r.status, json: j }; }); });
+      return { status: r.status, json: j, text: t }; }); });
   };
   var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
                                       branch: c.branch || "main" }, transport);
@@ -1794,7 +1930,10 @@ function keepSnapshot(state){
     localStorage.setItem(SNAP, JSON.stringify({
       at: Date.now(),
       state: {
-        matches: (state.matches || []).slice(-400),
+        /* Every round, not a tail of them. A 400-round cut made this screen's
+           totals, consistency and plan drift from the computer's without
+           saying a word. */
+        matches: (state.matches || []),
         config: {
           active: (state.config || {}).active,
           target: (state.config || {}).target,
@@ -1864,10 +2003,12 @@ function chosenDeck(){
 }
 
 function groupCards(deck){
-  var marks = deck.cardClass || {};
   var out = { "Pokémon": [], "Trainers": [], "Energy": [], "Not read yet": [] };
   (deck.list || []).forEach(function(c){
-    var m = marks[c.name] || {};
+    /* markFor matches on the card key, so "Poke Pad" finds the mark stored
+       under "Poké Pad". Looking the name up literally put every differently
+       spelled card in a "Not read yet" group the computer does not have. */
+    var m = MatchupDeck.markFor(deck, c.name) || {};
     var where = m.super === "pokemon" ? "Pokémon"
               : m.super === "trainer" ? "Trainers"
               : m.super === "energy" || m.energy ? "Energy"
@@ -1919,13 +2060,18 @@ function renderDeckView(){
     cell(r.w, "won", "good-t");
     cell(r.l, "lost", "bad-t");
     cell(r.t, "tied", r.t ? "warn-t" : null);
-    cell(wr === null ? "—" : (100*wr).toFixed(0) + "%", "win rate");
+    /* Faded below five rounds, the same threshold the computer uses. A flat
+       "100%" over a 2-0-0 start reads as a fact. */
+    cell(wr === null ? "—" : (100*wr).toFixed(0) + "%", "win rate",
+         n < 5 ? "thin-t" : null);
     cell(sum.games, "games");
     tc.appendChild(tot);
     /* The figures come from the database, so rounds still waiting on this
        phone are not in them. Saying so beats letting the list below show two
        rounds while the count above says one. */
     var held = pendingRounds(deck).length;
+    if(n && n < 5)
+      tc.appendChild(el("p","note", "Too few rounds for the win rate to mean much yet."));
     if(held)
       tc.appendChild(el("p","note", held + (held===1 ? " round" : " rounds") +
         " on this phone " + (held===1 ? "is" : "are") + " not in these figures yet — tap Send."));
@@ -1980,6 +2126,10 @@ function renderDeckView(){
   /* --- the plan, if an event is set ------------------------------------- */
   var plan = null;
   try{ plan = MatchupPlan.compute(st); }catch(e){ plan = null; }
+  /* The event belongs to one deck. Showing the main deck's plan under a side
+     deck's heading, with no word that it was another deck's, is worse than
+     showing nothing. */
+  if(plan && plan.deck && plan.deck.id !== deck.id) plan = null;
   if(plan && plan.daysLeft >= 0){
     var pc = el("div","card");
     pc.appendChild(el("h3",null,plan.event.name)).style.cssText="margin:0 0 2px;font-size:16px";
@@ -2021,7 +2171,9 @@ function renderDeckView(){
     var w=0,l=0,t=0;
     mine.forEach(function(m){ if(m.result==="W")w++; else if(m.result==="L")l++; else t++; });
     var held = mine.filter(function(m){ return m.unsent; }).length;
-    rc.appendChild(el("p","note", w+"–"+l+"–"+t+" across these ten." +
+    rc.appendChild(el("p","note", w+"–"+l+"–"+t+
+      (mine.length >= 10 ? " across these ten." : " across " +
+        (mine.length === 1 ? "this one round." : "these " + mine.length + " rounds.")) +
       (held ? " " + held + (held===1?" round is":" rounds are") +
               " still on this phone — tap Send to put them in the database." : "")))
       .style.marginTop="0";
@@ -2101,17 +2253,17 @@ function refreshDeckView(){
     return;
   }
   msg.textContent = "Reading…"; msg.className = "note";
-  var transport = function(method, url, body){
+  var transport = function(method, url, body, accept){
     /* no-store: GitHub's contents endpoint is cacheable, and a phone that
        answered from its own cache would show yesterday's database while
        saying it had just read it. */
     return fetch(url, { method: method, cache: "no-store",
-      headers: { "Authorization": "Bearer " + c.token, "Accept": "application/vnd.github+json",
+      headers: { "Authorization": "Bearer " + c.token, "Accept": accept || "application/vnd.github+json",
                  "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined
     }).then(function(r){ return r.text().then(function(t){
       var j=null; try{ j=JSON.parse(t); }catch(e){}
-      return { status: r.status, json: j }; }); });
+      return { status: r.status, json: j, text: t }; }); });
   };
   var store = new MatchupGh.GhStore({ repo: c.repo, path: c.path || "data.json",
                                       branch: c.branch || "main" }, transport);

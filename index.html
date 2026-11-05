@@ -172,7 +172,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       <p class="note">Use the last one before lending the phone to anyone, or if you stop using sync. It removes the saved token from this phone; it does not revoke it on GitHub.</p>
     </details>
   </div>
-  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-11-02 v2.26.0 · 556f418</p>
+  <p class="note" style="text-align:center;opacity:.55">Round Logger · build 2026-11-05 v2.27.0 · fa95d22</p>
 </div>
 
 <div id="screen-deck" class="hidden">
@@ -251,11 +251,21 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
 
   function mergeStates(a, b) {
     a = a || {}; b = b || {};
-    var tombs = Object.assign({}, a._tombstones || {});
-    var bt = b._tombstones || {};
-    Object.keys(bt).forEach(function (k) {
-      if (num(bt[k]) > num(tombs[k])) tombs[k] = bt[k];
+    /* A deletion is a moment, so a positive number of milliseconds. A 0 or a
+       negative value is no record of one, and used to delete every old entry
+       that carried no edit time of its own. Each side is filtered before the
+       two are combined, as in storage.py: filtered after, a deletion written
+       as text on one side beat the real one on the other and was then
+       dropped, and the deleted round came back. */
+    var tombs = {};
+    [a._tombstones || {}, b._tombstones || {}].forEach(function (t) {
+      Object.keys(t).forEach(function (k) {
+        var v = t[k];
+        if (typeof v !== "number" || !(v > 0)) return;
+        if (!(k in tombs) || v > tombs[k]) tombs[k] = v;
+      });
     });
+    var live = tombs;
 
     /* Winner per entry, by the entry's own timestamp - not by which side's
        database was written last. A phone saved at noon still must not push
@@ -276,12 +286,34 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       });
       var out = [];
       picked.forEach(function (v, id) {
-        if (num(v._modifiedAt) > tombstoneAt(tombs, kind, id)) out.push(v);
+        if (num(v._modifiedAt) > tombstoneAt(live, kind, id)) out.push(v);
       });
+      if (kind === "decks") out = out.map(dropDeletedVersions);
       out.sort(function (x, y) {
         return (num(x.ts) - num(y.ts)) || String(x.id).localeCompare(String(y.id));
       });
       return out;
+    }
+
+    /* A saved list version deleted from a deck that is still there is noted
+       as "versions:<deck>/<version>"; it has no edit time of its own, so the
+       moment it was made is what the deletion is weighed against. */
+    function dropDeletedVersions(deck) {
+      if (!deck || !Array.isArray(deck.versions) || !deck.versions.length) return deck;
+      var kept = deck.versions.filter(function (v) {
+        var key = "versions:" + deck.id + "/" + String(v && v.id);
+        var at = Object.prototype.hasOwnProperty.call(live, key) ? live[key] : -1;
+        return num(v && (v._modifiedAt || v.createdAt)) > at;
+      });
+      var ids = kept.map(function (v) { return v && v.id; });
+      /* Repaired whenever it names a version the deck does not hold, not
+         only after a deletion here - storage.py does the same, and the two
+         sides would otherwise keep rewriting each other's copy. */
+      var badCurrent = deck.currentVersion && ids.indexOf(deck.currentVersion) < 0;
+      if (kept.length === deck.versions.length && !badCurrent) return deck;
+      var d = Object.assign({}, deck, { versions: kept });
+      if (badCurrent) d.currentVersion = kept.length ? kept[kept.length - 1].id : null;
+      return d;
     }
 
     var matches = union("matches");
@@ -580,16 +612,37 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     if (!deck) return null;
 
     var rounds = roundsOf(state, deckId);
-    var p = pace(rounds, now);
+    /* The plan is the one made on the day the event was set, and it stays that
+       plan. It used to be worked out afresh from every round on each opening,
+       so a target that had been met dropped off the list and took its rounds
+       with it: progress stood still or went backwards as the player did what
+       was asked. Now what to play is decided from the rounds before that day
+       and the pace of that day; the rounds since then are the progress. An
+       event set before this existed has no date of its own and is read as set
+       today, as before. */
+    var since = e.setAt ? midnight(new Date(e.setAt)) : now;
+    if (since > now) since = now;
+    var before = rounds.filter(function (m) {
+      var d = asDate(m.date);
+      return d && d < since;
+    });
+    var p = pace(before, since);
+    /* Nothing recorded with the deck before the event was set: there is no
+       pace to plan from, and a plan frozen at zero would stay empty to the
+       end. Then it is worked out from every round, as it used to be. */
+    var live = !p.week;
+    if (live) { before = rounds; p = pace(rounds, now); }
+    var planFrom = live ? now : since;
     var weeksLeft = Math.max(0, left / 7);
-    var capacity = Math.max(0, Math.round(p.week * weeksLeft * (1 - RESERVE)));
+    var weeksPlanned = Math.max(0, daysBetween(planFrom, day) / 7);
+    var capacity = Math.max(0, Math.round(p.week * weeksPlanned * (1 - RESERVE)));
     /* Calendar days, not milliseconds: subtracting 86400000 across the spring
        clock change landed an hour early and told the player the list was
        locked a full day before it was. */
     var lock = asDate(e.lockDate) ||
       new Date(day.getFullYear(), day.getMonth(), day.getDate() - LOCK_DAYS);
 
-    var t = targets(state, rounds);
+    var t = targets(state, before);
     var picks = [],
       spent = 0;
     var chosen = {};
@@ -617,18 +670,20 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     take(t.meet, capacity - spent, MAX_TARGETS); // whatever is left over
 
     /* Progress is read off the match log. A plan with boxes to tick by hand
-       goes stale the first time someone forgets; this one cannot. */
-    var since = e.setAt ? midnight(new Date(e.setAt)) : now;
-    /* Only rounds against something the plan actually asked for. Counting
-       every round with the deck printed "40 of 3 planned rounds played",
-       because a round against an archetype nobody planned ticked a box. */
-    var planned = {};
-    picks.forEach(function (x) { planned[x.id] = 1; });
-    var done = rounds.filter(function (m) {
+       goes stale the first time someone forgets; this one cannot. Only rounds
+       against something the plan asked for count, and each archetype at most
+       as many times as it was asked for: five rounds against one deck do not
+       make up for the two never played against another, and "5 of 4" is not
+       a figure a plan should print. */
+    var playedSince = {};
+    rounds.forEach(function (m) {
       var d = asDate(m.date);
-      if (!d || d < since || d > day) return false;
-      return !!planned[familyOf(state, m.opp)];
-    }).length;
+      if (!d || d < since || d > day) return;
+      var f = familyOf(state, m.opp);
+      playedSince[f] = (playedSince[f] || 0) + 1;
+    });
+    picks.forEach(function (x) { x.played = Math.min(x.rounds, playedSince[x.id] || 0); });
+    var done = picks.reduce(function (s, x) { return s + x.played; }, 0);
 
     var met = {};
     rounds.forEach(function (m) {
@@ -648,6 +703,8 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
       deck: deck,
       daysLeft: left,
       weeksLeft: weeksLeft,
+      planSince: since,
+      planLive: live,
       pace: p,
       capacity: capacity,
       asked: spent,
@@ -733,17 +790,18 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   }
 
   /* L — the chance the deck simply functions by the end of your second turn,
-     given a keepable hand. Eight cards seen on the play, nine on the draw. */
+     given a keepable hand. Nine cards seen either way: seven, and one drawn
+     at the start of each turn. This said eight on the play, which is the EX
+     era rule (2004-05) where the player going first skipped that draw; the
+     rules since have it drawn. Prize cards change nothing here: the nine seen
+     are a random nine of the sixty whether six lie face down or not. */
+  var SEEN = 9;
   function listConsistency(basic, engine, energy) {
     var rest = DECK - basic - engine - energy;
     if (rest < 0 || basic <= 0) return null;
     var counts = [basic, engine, energy, rest];
-    var out = [];
-    [8, 9].forEach(function (d) {
-      var keep = pMeets(counts, d, [1, 0, 0, 0]);
-      out.push(keep ? pMeets(counts, d, [1, 2, 1, 0]) / keep : 0);
-    });
-    return (out[0] + out[1]) / 2;
+    var keep = pMeets(counts, SEEN, [1, 0, 0, 0]);
+    return keep ? pMeets(counts, SEEN, [1, 2, 1, 0]) / keep : 0;
   }
 
   /* The stricter question: a Basic, something to FIND with, something to
@@ -752,12 +810,8 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     var rest = DECK - basic - search - draw - energy;
     if (rest < 0 || basic <= 0 || !search || !draw) return null;
     var counts = [basic, search, draw, energy, rest];
-    var out = [];
-    [8, 9].forEach(function (d) {
-      var keep = pMeets(counts, d, [1, 0, 0, 0, 0]);
-      out.push(keep ? pMeets(counts, d, [1, 1, 1, 1, 0]) / keep : 0);
-    });
-    return (out[0] + out[1]) / 2;
+    var keep = pMeets(counts, SEEN, [1, 0, 0, 0, 0]);
+    return keep ? pMeets(counts, SEEN, [1, 1, 1, 1, 0]) / keep : 0;
   }
 
   function mulligan(basics) {
@@ -782,6 +836,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     });
     return out;
   }
+  var NAMED_PRIOR = 3;   // losses' worth of weight for the list's own prediction
   function engineReliability(games, L) {
     var losses = games.filter(function (g) { return g.r === "L"; });
     var named = losses.filter(function (g) { return g.reason; });
@@ -789,7 +844,11 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     /* Losses with no reason written down are split the way the named ones
        were, rather than counted as blameless. Coverage is shown, because
        that assumption is only as good as the habit of filling them in. */
-    var share = named.length ? faults / named.length : 1 - L;
+    /* Pulled towards what the list alone predicts while few losses carry a
+       reason. Taken raw, one named loss swung the share from 1 - L straight
+       to 0 or 1, and every unexplained loss with it: writing down the reason
+       for a single game moved the index by ten points either way. */
+    var share = (faults + NAMED_PRIOR * (1 - L)) / (named.length + NAMED_PRIOR);
     var b = faults + (losses.length - named.length) * share;
     var p = (b + PRIOR_GAMES * (1 - L)) / (games.length + PRIOR_GAMES);
     return {
@@ -868,20 +927,51 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
   }
 
   /* The spread of the index itself. Matches are resampled whole, because the
-     games inside one match are not independent of each other. */
+     games inside one match are not independent of each other.
+
+     Two things this got wrong. It drew with Math.random, so the band moved
+     every time the page was drawn, and the screen and the printed brief -
+     two draws - showed two different bands for the same rounds. And it gave
+     the raw 10th and 90th percentiles of the resampled index, which for a
+     figure bounded at 100 and built from products sits low: in about one
+     run in four the band did not contain the number printed beside it. Now
+     the generator is seeded from the rounds themselves, and the band is the
+     spread of the resamples laid around the printed figure. */
+  function roundsSeed(matches) {
+    var h = 2166136261;
+    matches.forEach(function (m) {
+      var key = String(m.id || "") + (m.result || "") + (m.games || []).map(function (g) { return g.r; }).join("");
+      for (var i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
+    });
+    var a = h >>> 0;
+    return function () {
+      a += 0x6D2B79F5;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
   function interval(matches, L) {
     if (matches.length < 4) return null;
+    var games = gamesOf(matches);
+    if (!games.length) return null;
+    var point = score(games, L).index;
+    var rnd = roundsSeed(matches);
     var vals = [];
-    for (var r = 0; r < 200; r++) {
+    for (var r = 0; r < 300; r++) {
       var pick = [];
       for (var i = 0; i < matches.length; i++)
-        pick.push(matches[(Math.random() * matches.length) | 0]);
+        pick.push(matches[(rnd() * matches.length) | 0]);
       var g = gamesOf(pick);
       if (g.length) vals.push(score(g, L).index);
     }
     if (vals.length < 50) return null;
     vals.sort(function (a, b) { return a - b; });
-    return [vals[Math.floor(vals.length * 0.1)], vals[Math.floor(vals.length * 0.9)]];
+    var mid = vals[Math.floor(vals.length * 0.5)];
+    var lo = point - Math.max(0, mid - vals[Math.floor(vals.length * 0.1)]);
+    var hi = point + Math.max(0, vals[Math.floor(vals.length * 0.9)] - mid);
+    return [Math.max(0, lo), Math.min(100, hi)];
   }
 
 
@@ -934,8 +1024,21 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     })[0] || "";
   }
 
+  /* A basic Energy, whichever way a site spells it: "Fire Energy", "Basic
+     Fire Energy", "Fire Energy - Basic", "Basic {R} Energy". The last two
+     were not read: one did not end in "Energy", the other is not a name the
+     card database knows - so a deck holding them was "not identified" and
+     the evolution lines came out empty. And the database answers "Darkness
+     Energy" with the special Energy of that name from 2001, so a plain
+     basic one was counted as special. A basic Energy needs no looking up. */
+  var ENERGY_TYPES = "Grass|Fire|Water|Lightning|Psychic|Fighting|Darkness|Metal";
+  var BASIC_ENERGY_RE = new RegExp("^(?:basic\\s+)?(?:" + ENERGY_TYPES + ")\\s+energy(?:\\s*-\\s*basic)?$" +
+    "|^basic\\s+\\{[GRWLPFDM]\\}\\s+energy$", "i");
+  function isBasicEnergy(c) {
+    return BASIC_ENERGY_RE.test(String((c && c.name) || "").trim());
+  }
   function isEnergy(c) {
-    return c.group === "energy" || /\bEnergy$/i.test(c.name || "");
+    return c.group === "energy" || /\bEnergy$/i.test(c.name || "") || isBasicEnergy(c);
   }
 
   function couldBeBasic(c) {
@@ -1013,9 +1116,16 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     var word = weakest >= 0.85 ? "Rock solid"
       : weakest >= 0.75 ? "Good, with one weak spot"
       : weakest >= 0.65 ? "Shaky" : "Unreliable";
+    /* Which check set the word. The index blends all three and the verdict
+       takes the weakest, so "86, Shaky" printed alone read as a contradiction;
+       naming the check that earned it explains the pair. */
+    var because = weakest >= 0.85 ? ""
+      : s.c1 === weakest ? "the openings"
+      : s.c2 === weakest ? "uneven across opponents"
+      : "leans on going first";
     /* The headline takes its colour from the same scale as the check that
        earned it, so an amber check never sits under a green verdict. */
-    return { word: word, cls: tone(weakest) };
+    return { word: word, cls: tone(weakest), because: because };
   }
 
   function turnGap(games) {
@@ -1155,7 +1265,7 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
     completeStart: completeStart, mulligan: mulligan, atLeastOne: atLeastOne,
     gamesOf: gamesOf, engineReliability: engineReliability, spread: spread,
     turnOrder: turnOrder, score: score, interval: interval,
-    isEnergy: isEnergy, marksOf: marksOf, classesOf: classesOf,
+    isEnergy: isEnergy, isBasicEnergy: isBasicEnergy, marksOf: marksOf, classesOf: classesOf,
     couldBeBasic: couldBeBasic,
     normalName: normalName, deckByName: deckByName,
     cardKey: cardKey, bestName: bestName, markFor: markFor, wonShare: wonShare,
@@ -1242,7 +1352,8 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
             if (body === null || body === undefined) {
               if (typeof r2.text === "string" && r2.text.trim()) body = JSON.parse(r2.text);
             }
-            if (body === null || body === undefined || typeof body !== "object") {
+            if (body === null || body === undefined || typeof body !== "object" || Array.isArray(body) ||
+                (size > 0 && !Object.keys(body).length)) {
               /* Still unreadable. Never report this as "no file": that is the
                  one answer that lets a push wipe the others out. */
               throw new Error("the database in the repository is too large to read through this connection");
@@ -1251,9 +1362,14 @@ details summary{min-height:var(--tap);display:flex;align-items:center;cursor:poi
             return body;
           });
       }
-      var text = b64decodeUtf8(raw);
+      var text = b64decodeUtf8(raw).replace(/^\uFEFF/, "");   // an editor's byte-order mark
       self.lastPull = Date.now(); self.message = "";
-      if (text.trim()) return JSON.parse(text);
+      if (text.trim()) {
+        var parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+          throw new Error("the file in the repository is not a Matchup Lab database");
+        return parsed;
+      }
       if (size > 0) throw new Error("the database in the repository could not be read");
       return null;
     });
@@ -1894,6 +2010,12 @@ function pullDecks(quiet){
     var cc = cfg();
     var typed = (Array.isArray(cc.decks) ? cc.decks : []).filter(function(d){ return !d.id; });
     cc.decks = decks.concat(typed);
+    /* The chosen deck was archived or deleted on the computer. It used to
+       stay chosen here: the list showed nothing picked, yet every new round
+       was still filed under the old deck's id. The choice is cleared, and the
+       player is told, quiet pull or not - this needs them. */
+    var gone = cc.deckId && !decks.some(function(d){ return d.id === cc.deckId; }) ? (cc.deckName || "the chosen deck") : "";
+    if (gone) { cc.deckId = ""; cc.deckName = ""; }
     setCfg(cc);
     var added = decks.filter(function(d){
       return !before.some(function(o){ return o.id === d.id; });
@@ -1906,6 +2028,10 @@ function pullDecks(quiet){
       msg.className = "note ok";
     }
     say("Loaded " + decks.length + " deck" + (decks.length===1?"":"s") + ".", "note ok");
+    if (gone) {
+      msg.textContent = gone + " is archived or deleted on the computer. Pick the deck you are playing before the next round.";
+      msg.className = "note bad";
+    }
   }).catch(function(e){
     say("Could not read the deck list: " + (e && e.message ? e.message : e), "note bad");
   }).then(function(){ btn.disabled = false; });
